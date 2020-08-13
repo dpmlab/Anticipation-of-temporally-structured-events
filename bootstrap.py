@@ -93,7 +93,7 @@ def resample(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pre
     Resamp.data = get_repdata(Resamp.fpath, subj_regex, 'filt*' + label + '*', subjs=subjects)
 
     # get slight res
-    sl_res, sl_vox = s_light(Resamp.data, mask_data, label)
+    sl_res, sl_vox = s_light(Resamp.data, mask_data)
 
     # get aucs and diffs
     sl_aucs = [get_AUCs(nevents, 2, segs) for segs in sl_res]
@@ -103,14 +103,12 @@ def resample(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pre
 
     return vox3d_rep1, vox3d_lastreps, vox_AUCdiffs
 
-def bootstrap_lagcorrs(n_resamp, condition, dil_cluster_mask_fpath, cluster_mask_fpath, n_subjs=30):
+def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, n_subjs=30):
 
     # if len(subjs) > 0:
     #     subjects = deepcopy(subjs)
     # else:
     #     subjects = [subjdir for subjdir in os.listdir(data_fpath) if fnmatch.fnmatch(subjdir, subj_regex)]
-
-    label = get_label(condition)
 
     results = []
 
@@ -148,13 +146,13 @@ def bootstrap_lagcorrs(n_resamp, condition, dil_cluster_mask_fpath, cluster_mask
 
         resamp_subjs = np.random.randint(n_subjs, size=n_subjs)
 
-        process = pool.apply(lag0_corr, args=(resamp_subjs, label, n_rois, roi_dilated, roi_clusters, ev_annot_convolved))
+        process = pool.apply(lag0_corr, args=(resamp_subjs, n_rois, roi_dilated, roi_clusters, ev_annot_convolved))
         results.append(process)
 
     return np.array(results)[:, 0, :, :, :], np.array(results)[:, 1, :, :, :], np.array(results)[:, 2, :, :, :], np.array(results)[:, 3, :, :, :]
 
 
-def lag0_corr(subj_idxs, label, n_rois, roi_dilated, roi_clusters, ev_conv, vox_map_shape=(121, 145, 121)):
+def lag0_corr(subj_idxs, n_rois, roi_dilated, roi_clusters, ev_conv, vox_map_shape=(121, 145, 121)):
 
     from utils.Dataset import get_roidata
 
@@ -177,7 +175,7 @@ def lag0_corr(subj_idxs, label, n_rois, roi_dilated, roi_clusters, ev_conv, vox_
 
         cluster_data = d_in[:, :, cluster_mask.astype(bool)]
 
-        segs = tj_fit(label, cluster_data)
+        segs = tj_fit(cluster_data)
 
         dts_first = get_DTs(segs[0])
         dts_last = get_DTs(segs[1])
@@ -188,7 +186,7 @@ def lag0_corr(subj_idxs, label, n_rois, roi_dilated, roi_clusters, ev_conv, vox_
 
         dil_clust_data = d_in
 
-        dil_segs = tj_fit(label, dil_clust_data)
+        dil_segs = tj_fit(dil_clust_data)
 
         dil_dts_first = get_DTs(dil_segs[0])
         dil_dts_lasts = get_DTs(dil_segs[1])
