@@ -17,6 +17,59 @@ from trial_jointfit import tj_fit
 
 
 
+def int_original():
+
+
+    # mask_fpath = 'MNI152_T1_brain_resample.nii'
+    # subj_dirpath = 'all_subjs/'
+    # header_file_fpath = 'all_subjs/0408161_predtrw02/filtFuncMNI_Intact_Rep1.nii'
+
+    # ***************************************************** #
+
+    # ***************************************************** #
+
+    mask_fpath = '../../../data/gbh/data/MNI152_T1_brain_resample.nii'
+    subj_dirpath = '../../../data/gbh/data/'
+    header_file_fpath = '../../../data/gbh/data/0408161_predtrw02/filtFuncMNI_Intact_Rep1.nii'
+
+    # ***************************************************** #
+
+    # ***************************************************** #
+    msk_start = time.time()
+    mask = Dataset(mask_fpath)
+    mask.data = get_maskdata(mask.fpath)
+    msk_end = time.time()
+    print("minutes to process mask = ", round((msk_end - msk_start) / 60, 3))
+
+    dset_start = time.time()
+    ds = Dataset(subj_dirpath)
+    ds.data = get_repdata(ds.fpath, '*pred*', 'filt*Intact*')
+
+
+    ds.non_nan_mask = get_non_nan_mask(ds.num_not_nan, mask.data)
+    arr_to_nii('int_ds_nonnanmask_0408.nii', header_file_fpath, np.asarray(ds.non_nan_mask).T)
+
+    dset_end = time.time()
+    print("minutes to process dataset = ", round((dset_end - dset_start) / 60, 3))
+
+    arr_to_nii('int_ds_zs_' + str(date.today()) + '.nii', header_file_fpath, np.asarray(ds.data))
+    arr_to_nii('int_ds_notnan_rep1' + str(date.today()) + '.nii', header_file_fpath, np.asarray(ds.num_not_nan[0]).T)
+
+    sl_res, sl_vox = s_light(ds.data, ds.non_nan_mask, 'Intact')
+
+    print("number of searchlights = ", len(sl_res))
+
+    sl_aucs = [get_AUCs(7, 2, segs) for segs in sl_res]
+    vox3d_rep1, vox3d_lastreps = get_vox_map(sl_aucs, sl_vox, ds.non_nan_mask)
+
+    arr_to_nii('vox3d_rep1AUC_int_slight_' + str(date.today()) + '.nii', header_file_fpath, vox3d_rep1.T)
+    arr_to_nii('vox3d_lastrepsAUC_int_slight_' + str(date.today()) + '.nii', header_file_fpath, vox3d_lastreps.T)
+
+    vox_AUCdiffs = vox3d_lastreps - vox3d_rep1
+    arr_to_nii('voxAUCdiffs_int_slight_' + str(date.today()) + '.nii', header_file_fpath, vox_AUCdiffs.T)
+
+
+
 def conf_int_bootstrap_res(orig_auc_fpath, bstraps_regex, res_dir='results/', mask_fpath='MNI152_T1_brain_resample.nii', is_lag0=True):
 
     resamp_files = [file for file in os.listdir(res_dir) if fnmatch.fnmatch(file, bstraps_regex)]
@@ -247,7 +300,6 @@ def get_individual_sl_res(vox_x, vox_y, vox_z):
     non_nan_mask = get_maskdata(mask)
     header_file_fpath = 'all_subjs/0408161_predtrw02/filtFuncMNI_Intact_Rep2.nii'
 
-    # sl_voxels = [(93, 38, 68), (44, 28, 56), (40, 114, 38)]
     sl_voxels = [(vox_x, vox_y, vox_z)]
 
     for idx, voxels in enumerate(sl_voxels):
@@ -397,57 +449,6 @@ def sfix_original():
 
 
 
-def int_original():
-
-
-    # mask_fpath = 'MNI152_T1_brain_resample.nii'
-    # subj_dirpath = 'all_subjs/'
-    # header_file_fpath = 'all_subjs/0408161_predtrw02/filtFuncMNI_Intact_Rep1.nii'
-
-    # ***************************************************** #
-
-    # ***************************************************** #
-
-    mask_fpath = '../../../data/gbh/data/MNI152_T1_brain_resample.nii'
-    subj_dirpath = '../../../data/gbh/data/'
-    header_file_fpath = '../../../data/gbh/data/0408161_predtrw02/filtFuncMNI_Intact_Rep1.nii'
-
-    # ***************************************************** #
-
-    # ***************************************************** #
-    msk_start = time.time()
-    mask = Dataset(mask_fpath)
-    mask.data = get_maskdata(mask.fpath)
-    msk_end = time.time()
-    print("minutes to process mask = ", round((msk_end - msk_start) / 60, 3))
-
-    dset_start = time.time()
-    ds = Dataset(subj_dirpath)
-    ds.data = get_repdata(ds.fpath, '*pred*', 'filt*Intact*')
-
-
-    ds.non_nan_mask = get_non_nan_mask(ds.num_not_nan, mask.data)
-    arr_to_nii('int_ds_nonnanmask_0408.nii', header_file_fpath, np.asarray(ds.non_nan_mask).T)
-
-    dset_end = time.time()
-    print("minutes to process dataset = ", round((dset_end - dset_start) / 60, 3))
-
-    arr_to_nii('int_ds_zs_' + str(date.today()) + '.nii', header_file_fpath, np.asarray(ds.data))
-    arr_to_nii('int_ds_notnan_rep1' + str(date.today()) + '.nii', header_file_fpath, np.asarray(ds.num_not_nan[0]).T)
-
-    sl_res, sl_vox = s_light(ds.data, ds.non_nan_mask, 'Intact')
-
-    print("number of searchlights = ", len(sl_res))
-
-    sl_aucs = [get_AUCs(7, 2, segs) for segs in sl_res]
-    vox3d_rep1, vox3d_lastreps = get_vox_map(sl_aucs, sl_vox, ds.non_nan_mask)
-
-    arr_to_nii('vox3d_rep1AUC_int_slight_' + str(date.today()) + '.nii', header_file_fpath, vox3d_rep1.T)
-    arr_to_nii('vox3d_lastrepsAUC_int_slight_' + str(date.today()) + '.nii', header_file_fpath, vox3d_lastreps.T)
-
-    vox_AUCdiffs = vox3d_lastreps - vox3d_rep1
-    arr_to_nii('voxAUCdiffs_int_slight_' + str(date.today()) + '.nii', header_file_fpath, vox_AUCdiffs.T)
-
 
 def test_bootstrap():
 
@@ -474,21 +475,6 @@ def test_bootstrap():
     arr_to_nii('auc_100resamps_diffs_' + str(date.today()) + '.nii', header_file_fpath, diff)
 
 
-# def delta_int_sfix(int_regex, sfix_regex, n_files, res_dir='results/', shape=(121, 145, 121)):
-#
-#     int_sfix = []
-#
-#     for n_file in range(1, n_files + 1):
-#
-#         int_file = [file for file in os.listdir(res_dir) if fnmatch.fnmatch(file, int_regex + str(n_file) + '.nii')]
-#         sfix_file = [file for file in os.listdir(res_dir) if fnmatch.fnmatch(file, sfix_regex + str(n_file) + '.nii')]
-
-        # assert len(int_file) == 1
-        # assert len(int_file) == len(sfix_file)
-#
-#         int_sfix.append(np.asarray(nib.load(res_dir + int_file[0]).get_fdata()) - np.asarray(nib.load(res_dir + sfix_file[0]).get_fdata()))
-#
-#     return np.concatenate(int_sfix, axis=0)
 
 def lag_corr_analysis(vox_map_shape=(121, 145, 121), max_lags=20):
 

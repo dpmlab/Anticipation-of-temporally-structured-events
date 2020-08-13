@@ -1,9 +1,7 @@
 import numpy as np
 import random, os, fnmatch, multiprocessing as mp, math
 from copy import deepcopy
-from utils.pickles import arr_to_nii, arr_to_hdf5
 from time import time
-from datetime import date
 
 from utils.Dataset import Dataset, get_repdata, get_maskdata, get_non_nan_mask
 from utils.labels import get_label

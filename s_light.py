@@ -6,27 +6,52 @@ from trial_jointfit import tj_fit
 from utils.pickles import arr_to_hdf5
 
 
-def s_light(data, non_nan_mask, condition, stride=5, radius=5, min_vox=20, save_res=False):
+def s_light(data, non_nan_mask, stride=5, radius=5, min_vox=20, save_res=False, f_name=''):
 
+    """
+    Fits HMM to searchlights to extract event boundaries from first and averaged last viewings.
 
+    Executes searchlight analysis on voxel x voxel x voxel data.
+
+    Masks nan values in dataset before execution.
+
+    Stride and radius are used to adjust searchlight size and movement.
+
+    Minimum number of voxels per searchlight can be specified.
+
+    Saves searchlight results and voxels as npy files. Use numpy.load(<file name>, allow_pickle=True) to unpickle.
+
+    :param data: array_like
+        Voxel x voxel x voxel data for searchlight analysis.
+
+    :param non_nan_mask: array_like
+        Voxel x voxel x voxel boolean mask indicating elements that contain data.
+
+    :param stride: int, optional
+        Specifies amount by which searchlights move across data
+
+    :param radius: int, optional
+        Specifies radius of each searchlight
+
+    :param min_vox: int, optional
+        Indicates the minimum number of elements with data for each searchlight
+
+    :param save_res: bool, optional
+        Set to True in order to save searchlight results and voxels as npy files.
+
+    :return:
+        results: list
+            Results of HMM fits on searchlights
+
+        voxels: list
+            Voxels in each searchlight
+
+    """
     coords = np.transpose(np.where(non_nan_mask))
     d = np.asarray(deepcopy(data))
     d = d[:, :, non_nan_mask]
 
     SL_allvox = []
-
-    # debugging 02/2018
-
-    # distances = cdist(coords, np.array([86, 123, 49]).reshape((1,3)))[:, 0]
-    # #distances = cdist(coords, np.array([86, 112, 53]).reshape((1, 3)))[:, 0]
-    # sorted = np.argsort(distances, kind='mergesort')
-    # SL_vox = np.where(distances <= radius)[0]
-    # print(len(SL_vox))
-    # if len(SL_vox) >= min_vox:
-    #     SL_allvox.append(SL_vox)
-    #     #SL_coords.append(np.array([88, 114, 53]))
-
-    # end debugging 02/2018
 
     sl_vox_start = time.time()
 
@@ -42,16 +67,16 @@ def s_light(data, non_nan_mask, condition, stride=5, radius=5, min_vox=20, save_
 
     res_start = time.time()
 
-    print("time in minutes to get sl voxels = ", round((res_start - sl_vox_start) / 60, 3))
+    print("time in minutes to get searchlight voxels = ", round((res_start - sl_vox_start) / 60, 3))
 
-    SL_results = [tj_fit(condition, d[:, :, sl]) for sl in SL_allvox]
+    SL_results = [tj_fit(d[:, :, sl]) for sl in SL_allvox]
 
     if save_res:
-        arr_to_hdf5('sl_res_' + condition + '.h5', SL_results)
-        arr_to_hdf5('sl_allvox_' + condition + '.h5', SL_allvox)
+        np.save('sl_res_' + f_name + '.npy', SL_results)
+        np.save('sl_allvox_' + f_name + '.npy', SL_allvox)
 
     res_end = time.time()
-    print("time in minutes to get sl results = ", round((res_end - res_start) / 60, 3))
+    print("time in minutes to get searchlight results = ", round((res_end - res_start) / 60, 3))
 
     return SL_results, SL_allvox
 
@@ -59,8 +84,6 @@ def s_light(data, non_nan_mask, condition, stride=5, radius=5, min_vox=20, save_
 def get_vox_map(SL_results, SL_voxels, non_nan_mask):
 
     coords = np.transpose(np.where(non_nan_mask))
-
-    # coords = deepcopy(mask)
 
     voxel_map_rep1 = np.zeros(coords.shape[0])
     voxel_map_lastreps = np.zeros(coords.shape[0])
