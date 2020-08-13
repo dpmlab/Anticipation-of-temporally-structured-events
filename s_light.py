@@ -39,11 +39,10 @@ def s_light(data, non_nan_mask, stride=5, radius=5, min_vox=20, save_res=False, 
     :param save_res: bool, optional
         Set to True in order to save searchlight results and voxels as npy files.
 
-    :return:
-        results: list
+    :return SL_results: list
             Results of HMM fits on searchlights
 
-        voxels: list
+    :return SL_allvox: list
             Voxels in each searchlight
 
     """
@@ -83,6 +82,26 @@ def s_light(data, non_nan_mask, stride=5, radius=5, min_vox=20, save_res=False, 
 
 def get_vox_map(SL_results, SL_voxels, non_nan_mask):
 
+    """
+    Projects results of HMM fits from the searchlight analysis to voxel maps.
+
+    :param SL_results: array_like
+        Results of the searchlight analysis from s_light function.
+
+    :param SL_voxels: array_like
+        Voxel information from searchlight analysis
+
+    :param non_nan_mask: array_like
+        Voxel x voxel x voxel boolean mask indicating elements that contain data.
+
+    :return voxel_3dmap_rep1: ndarray
+        Repetition 1's 3d voxel map of results
+
+    :return voxel_3dmap_lastreps: ndarray
+        Last repetitions' average's 3d voxel map of results
+
+    """
+
     coords = np.transpose(np.where(non_nan_mask))
 
     voxel_map_rep1 = np.zeros(coords.shape[0])
@@ -111,7 +130,45 @@ def get_vox_map(SL_results, SL_voxels, non_nan_mask):
     return voxel_3dmap_rep1, voxel_3dmap_lastreps
 
 
-def individual_sl_res(data, non_nan_mask, condition, x, y, z, radius=5, min_vox=20):
+def individual_sl_res(data, non_nan_mask, x, y, z, radius=5, min_vox=20):
+
+    """
+    Fits HMM to an individual searchlight to extract event boundaries from first and averaged last viewings.
+
+    Masks nan values in dataset before execution.
+
+    Minimum number of voxels per searchlight can be specified.
+
+    Saves searchlight result and voxels as npy files. Use numpy.load(<file name>, allow_pickle=True) to unpickle.
+
+    :param data: array_like
+        Voxel x voxel x voxel data for searchlight analysis.
+
+    :param non_nan_mask: array_like
+        Voxel x voxel x voxel boolean mask indicating elements that contain data.
+
+    :param x: int
+        x coordinate of individual searchlight
+
+    :param y: int
+        y coordinate of individual searchlight
+
+    :param z: int
+        z coordinate of individual searchlight
+
+    :param radius: int, optional
+        Specifies radius of individual searchlight
+
+    :param min_vox: int, optional
+        Indicates the minimum number of elements with data for the searchlight
+
+    :return SL_results: list
+        Results of HMM fits on individual searchlight
+
+    :return SL_allvox: list
+            Voxels in searchlight
+
+    """
 
     coords = np.transpose(np.where(non_nan_mask))
     d = np.asarray(deepcopy(data))
@@ -125,6 +182,6 @@ def individual_sl_res(data, non_nan_mask, condition, x, y, z, radius=5, min_vox=
     if len(SL_vox) >= min_vox:
         SL_allvox.append(SL_vox)
 
-    SL_results = [tj_fit(condition, d[:, :, sl]) for sl in SL_allvox]
+    SL_results = [tj_fit(d[:, :, sl]) for sl in SL_allvox]
 
     return SL_results, SL_allvox

@@ -2,10 +2,6 @@ import numpy as np
 from brainiak.eventseg.event import EventSegment
 from copy import deepcopy
 
-from utils.labels import get_label
-from num_events import get_numevents
-
-
 def tj_fit(data, n_events=7, avg_lasts=True):
 
     # assume data is nanmeaned average of all subjects... #
