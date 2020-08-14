@@ -20,7 +20,7 @@ def tj_fit(data, n_events=7, avg_lasts=True):
         If true, HMM is fit to a) first viewing and b) the average of subsequent viewings.
 
     :return ev_obj.segments_: array_like
-        Results of model fit 
+        Results of model fit
     """
 
     d = deepcopy(data)

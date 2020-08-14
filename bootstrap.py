@@ -4,7 +4,6 @@ from copy import deepcopy
 from time import time
 
 from utils.Dataset import Dataset, get_repdata, get_maskdata, get_non_nan_mask
-from utils.labels import get_label
 import nibabel as nib
 
 from s_light import s_light, get_vox_map
@@ -13,78 +12,45 @@ from trial_jointfit import tj_fit
 from scipy.stats import pearsonr
 
 
-def bootstrap(n_resamp, condition, data_fpath, mask, subj_regex, subjs=[], randomize=False):
+def bootstrap(n_resamp, data_fpath, mask, subj_regex, subjs=[], randomize=False, label='Intact', percent_cpu=0.75):
+
+    # EXCEPTION HANDLING: do not let users use more than 90% of CPUs... #
 
     if len(subjs) > 0:
         subjects = deepcopy(subjs)
     else:
         subjects = [subjdir for subjdir in os.listdir(data_fpath) if fnmatch.fnmatch(subjdir, subj_regex)]
 
-    label = get_label(condition)
-
     resamped_subjs = []
-
     results = []
 
-    cpus = math.floor(mp.cpu_count() * .75)
+    cpus = math.floor(mp.cpu_count() * percent_cpu)
     pool = mp.Pool(processes=cpus)
 
     time_start = time()
 
-    # for resamp in range(n_resamp):
-    #     process = mp.Process(target=resample, args=(subjects, data_fpath, label, mask))
-    #     processes.append(process)
-    #     process.start()
-
     for resamp in range(n_resamp):
+
         if randomize:
-            resamp_subjs = rand_subjs(subjects)
+            resamp_subjs = [random.choice(subjects) for subject in range(len(subjects))]
             resamped_subjs.append(resamp_subjs)
+
         else:
             resamp_subjs = deepcopy(subjects[resamp])
+
         process = pool.apply(resample, args=(resamp_subjs, data_fpath, label, mask))
         results.append(process)
-
-    # results = [pool.apply(resample, args=(subjects, data_fpath, label, mask)) for resamp in n_resamp]
-
-    # start processes #
-    # for process in processes:
-    #     process.start()
-
-    # return processes #
-    # for process in processes:
-    #     process.join()
-
-    # results = [output.get() for process in processes]
 
     time_end = time()
 
     print("total time for {} resamplings = {} minutes".format(n_resamp, round((time_end - time_start) / 60, 4)))
-
-    # for sample in range(num_resamp):
-    #
-    #     vox3d_rep1, vox3d_lastreps, vox_AUCdiffs = resample(subjects, fpath, label, mask.data)
-    #
-    #     resamp_aucs_rep1.append(vox3d_rep1)
-    #     resamp_aucs_last.append(vox3d_lastreps)
-    #     resamp_aucs_diff.append(vox_AUCdiffs)
-
-    # return results: range of diffs, is in conf int, etc.
 
 
     resamp_aucs_rep1 = np.array(results)[:, 0, :, :, :]
     resamp_aucs_last = np.array(results)[:, 1, :, :, :]
     resamp_aucs_diff = np.array(results)[:, 2, :, :, :]
 
-    # arr_to_hdf5('subjs_bootstrap_' + condition + str(date.today()), np.array(results)[3])
-
-    # arr_to_nii('avg_diffs_resamps.nii', header_file_fpath, np.nanmean(resamp_aucs_diff, axis=0))
-
     return resamp_aucs_rep1, resamp_aucs_last, resamp_aucs_diff, resamped_subjs
-
-
-def rand_subjs(subjs):
-    return [random.choice(subjs) for subj in range(len(subjs))]
 
 
 def resample(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pred*'):
@@ -190,9 +156,6 @@ def lag0_corr(subj_idxs, n_rois, roi_dilated, roi_clusters, ev_conv, vox_map_sha
 
         dil_dts_first = get_DTs(dil_segs[0])
         dil_dts_lasts = get_DTs(dil_segs[1])
-
-        temp1 = pearsonr(dil_dts_first, ev_conv[1:])[0]
-        temp2 = pearsonr(dil_dts_lasts, ev_conv[1:])[0]
 
         dil_first_lag0corr[dilated_mask] = pearsonr(dil_dts_first, ev_conv[1:])[0]
         dil_lasts_lag0corr[dilated_mask] = pearsonr(dil_dts_lasts, ev_conv[1:])[0]
