@@ -151,15 +151,57 @@ def slight_aucs(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*
     return vox3d_rep1, vox3d_lastreps, vox_AUCdiffs
 
 
-def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath,ev_annot, n_subjs=30):
+def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, ev_annot, n_subjs=30, n_ev_subjs=14, percent_cpu=0.75):
+
+    """
+
+    Generate a bootstrap distribution of lag correlations on resampled data.
+
+    Uses multiprocessing to complete bootstrap computations in parallel.
+
+    :param n_resamp: int
+        Number of times to resample original dataset for the bootstrap distribution.
+
+    :param dil_cluster_mask_fpath: string
+        Mask of clusters of dilated ROIs using binary_dilation from scipy.ndimage.morphology
+
+    :param cluster_mask_fpath: string
+        Mask of clusters of undilated ROIS.
+
+    :param ev_annot: ndarray
+        An list of event boundaries annotated by viewers. Boundaries correspond to time in seconds.
+
+    :param n_subjs: int, optional
+        Number of subjects included in fMRI dataset (main analysis).
+
+    :param n_ev_subjs: int, optional
+        Number of subjects included in event annotation dataset.
+
+    :param percent_cpu: float, optional
+        Amount of CPUs to use in multiprocessing. 0.75 corresponds to 75%. Cannot exceed 90% CPU usage.
+
+    :return first_lag0corr: ndarray
+        Lag correlation results comparing the first viewing to no lag.
+
+    :return lasts_lag0corr: ndarray
+        Lag correlation results comparing the last viewings to no lag.
+
+    :return dil_first_lag0corr: ndarray
+        Lag correlation results comparing the first viewing to no lag (using dilated ROIS).
+
+    :return dil_lasts_lag0corr: ndarray
+        Lag correlation results comparing the last viewings to no lag (using dilated ROIS).
+
+
+    """
 
     results = []
 
-    cpus = math.floor(mp.cpu_count() * .75)
+    cpus = math.floor(mp.cpu_count() * percent_cpu)
     pool = mp.Pool(processes=cpus)
 
     ev_annot_frequencies = ev_annot_freq(ev_annot)
-    ev_annot_convolved = hrf_convolution(ev_annot_frequencies, 14)
+    ev_annot_convolved = hrf_convolution(ev_annot_frequencies, n_ev_subjs)
 
     roi_dilated = np.asarray(nib.load(dil_cluster_mask_fpath).get_fdata())
     roi_clusters = np.asarray(nib.load(cluster_mask_fpath).get_fdata())
