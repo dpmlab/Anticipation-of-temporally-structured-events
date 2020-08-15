@@ -181,16 +181,16 @@ def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, ev_
         Amount of CPUs to use in multiprocessing. 0.75 corresponds to 75%. Cannot exceed 90% CPU usage.
 
     :return first_lag0corr: ndarray
-        Lag correlation results comparing the first viewing to no lag.
+        Bootstrapped lag correlation results comparing the first viewing to no lag.
 
     :return lasts_lag0corr: ndarray
-        Lag correlation results comparing the last viewings to no lag.
+        Bootstrapped lag correlation results comparing the last viewings to no lag.
 
     :return dil_first_lag0corr: ndarray
-        Lag correlation results comparing the first viewing to no lag (using dilated ROIS).
+        Bootstrapped lag correlation results comparing the first viewing to no lag (using dilated ROIS).
 
     :return dil_lasts_lag0corr: ndarray
-        Lag correlation results comparing the last viewings to no lag (using dilated ROIS).
+        Bootstrapped lag correlation results comparing the last viewings to no lag (using dilated ROIS).
 
 
     """
@@ -219,6 +219,46 @@ def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, ev_
 
 
 def lag0_corr(subj_idxs, n_rois, roi_dilated, roi_clusters, ev_conv, vox_map_shape=(121, 145, 121)):
+
+    """
+    Performs a lag correlation between fMRI data and hand-annotated event data.
+
+    Correlates convolutions of event annotations (organized as frequency of events over time in seconds) and brain HMM fits.
+
+    Uses both dilated and undilated ROIs, all of which survived FDR correction on the main analysis.
+
+    :param subj_idxs: list
+        List of subject indices. Used to return ROI data.
+
+    :param n_rois: int
+        Number of ROIs.
+
+    :param roi_dilated: array_like
+        Mask of dilated ROIs.
+
+    :param roi_clusters: array_like
+        Mask of ROI clusters.
+
+    :param ev_conv: array_like
+        Event boundaries convolved with the HRF
+
+    :param vox_map_shape: tuple of ints, optional
+        Shape of the input voxel map.
+
+    :return first_lag0corr: ndarray
+        Lag correlation results comparing the first viewing to no lag.
+
+    :return lasts_lag0corr: ndarray
+        Lag correlation results comparing the last viewings to no lag.
+
+    :return dil_first_lag0corr: ndarray
+        Lag correlation results comparing the first viewing to no lag (using dilated ROIS).
+
+    :return dil_lasts_lag0corr: ndarray
+        Lag correlation results comparing the last viewings to no lag (using dilated ROIS).
+
+
+    """
 
     from utils.Dataset import get_roidata
 
