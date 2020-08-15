@@ -12,9 +12,50 @@ from trial_jointfit import tj_fit
 from scipy.stats import pearsonr
 
 
-def bootstrap(n_resamp, data_fpath, mask, subj_regex, subjs=[], randomize=False, label='Intact', percent_cpu=0.75):
+def bootstrap(n_resamp, data_fpath, mask, subj_regex, subjs=[], randomize=True, label='Intact', percent_cpu=0.75):
 
     # EXCEPTION HANDLING: do not let users use more than 90% of CPUs... #
+
+    """
+
+    :param n_resamp: int
+        Number of times to resample original dataset for the bootstrap distribution.
+
+    :param data_fpath: string
+        Name of filepath pointing to the directory in which the data for bootstrapping is stored.
+
+    :param mask: array_like
+        Voxel x voxel x voxel boolean mask indicating elements that contain data, passed as non-nan mask parameter
+        in the searchlight function.
+
+    :param subj_regex: string
+        Regular expression identifying all data file names.
+
+    :param subjs: list, optional
+        Option for manually indicating subjects to be considered for bootstrapping.
+
+    :param randomize: boolean, optional
+        Allows for resampling, with replacement, from the original dataset. Set to False if manually adding subjs.
+
+    :param label: string, optional
+        Used to identify subject files by condition (e.g. 'Intact' vs 'SFix' in GBH dataset).
+
+    :param percent_cpu: float, optional
+        Amount of CPUs to use in multiprocessing. 0.75 corresponds to 75%. Cannot exceed 90% CPU usage.
+
+    :return resamp_aucs_rep1: ndarray
+        Bootstrapped AUC (Area Under the Curve) results for the first repetition.
+
+    :return resamp_aucs_last: ndarray
+        Bootstrapped AUC results for the last repetitions.
+
+    :return resamp_aucs_diff: ndarray
+        Bootstrapped results of the last repetition's AUC minus first (resamp_aucs_last - resamp_aucs_last).
+
+    :return resamped_subjs: list
+        A list of the subjects used in each bootstrap.
+        
+    """
 
     if len(subjs) > 0:
         subjects = deepcopy(subjs)
@@ -55,6 +96,7 @@ def bootstrap(n_resamp, data_fpath, mask, subj_regex, subjs=[], randomize=False,
 
 def resample(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pred*'):
 
+
     Resamp = Dataset(data_fpath)
     Resamp.data = get_repdata(Resamp.fpath, subj_regex, 'filt*' + label + '*', subjs=subjects)
 
@@ -69,36 +111,13 @@ def resample(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pre
 
     return vox3d_rep1, vox3d_lastreps, vox_AUCdiffs
 
-def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, n_subjs=30):
 
-    # if len(subjs) > 0:
-    #     subjects = deepcopy(subjs)
-    # else:
-    #     subjects = [subjdir for subjdir in os.listdir(data_fpath) if fnmatch.fnmatch(subjdir, subj_regex)]
+def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath,ev_annot, n_subjs=30):
 
     results = []
 
     cpus = math.floor(mp.cpu_count() * .75)
     pool = mp.Pool(processes=cpus)
-
-    # time_start = time()
-
-    ev_annot = np.asarray(
-        [5, 12, 54, 77, 90,
-         3, 12, 23, 30, 36, 43, 50, 53, 78, 81, 87, 90,
-         11, 23, 30, 50, 74,
-         1, 55, 75, 90,
-         4, 10, 53, 77, 82, 90,
-         11, 54, 77, 81, 90,
-         12, 22, 36, 54, 78,
-         12, 52, 79, 90,
-         10, 23, 30, 36, 43, 50, 77, 90,
-         13, 55, 79, 90,
-         4, 10, 23, 29, 35, 44, 51, 56, 77, 80, 85, 90,
-         11, 55, 78, 90,
-         11, 30, 43, 54, 77, 90,
-         4, 11, 24, 30, 38, 44, 54, 77, 90]
-    )
 
     ev_annot_frequencies = ev_annot_freq(ev_annot)
     ev_annot_convolved = hrf_convolution(ev_annot_frequencies, 14)

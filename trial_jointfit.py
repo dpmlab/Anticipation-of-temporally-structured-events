@@ -21,6 +21,7 @@ def tj_fit(data, n_events=7, avg_lasts=True):
 
     :return ev_obj.segments_: array_like
         Results of model fit
+
     """
 
     d = deepcopy(data)
