@@ -18,6 +18,10 @@ def bootstrap(n_resamp, data_fpath, mask, subj_regex, subjs=[], randomize=True, 
 
     """
 
+    Generate a bootstrap distribution of HMM fits on resampled data.
+
+    Uses multiprocessing to complete bootstrap computations in parallel.
+
     :param n_resamp: int
         Number of times to resample original dataset for the bootstrap distribution.
 
@@ -54,7 +58,7 @@ def bootstrap(n_resamp, data_fpath, mask, subj_regex, subjs=[], randomize=True, 
 
     :return resamped_subjs: list
         A list of the subjects used in each bootstrap.
-        
+
     """
 
     if len(subjs) > 0:
@@ -79,7 +83,7 @@ def bootstrap(n_resamp, data_fpath, mask, subj_regex, subjs=[], randomize=True, 
         else:
             resamp_subjs = deepcopy(subjects[resamp])
 
-        process = pool.apply(resample, args=(resamp_subjs, data_fpath, label, mask))
+        process = pool.apply(slight_aucs, args=(resamp_subjs, data_fpath, label, mask))
         results.append(process)
 
     time_end = time()
@@ -94,7 +98,42 @@ def bootstrap(n_resamp, data_fpath, mask, subj_regex, subjs=[], randomize=True, 
     return resamp_aucs_rep1, resamp_aucs_last, resamp_aucs_diff, resamped_subjs
 
 
-def resample(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pred*'):
+def slight_aucs(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pred*'):
+
+    """
+
+    Executes searchlight analysis on bootstrapped datasets, and computes AUCs for HMM fits.
+
+    :param subjects: list
+        List of subjects to include in the HMM fit.
+
+    :param data_fpath: string
+        Name of filepath pointing to the directory in which the data is stored.
+
+    :param label: string
+        Used to identify subject files by condition (e.g. 'Intact' vs 'SFix' in GBH dataset).
+
+    :param mask_data: array_like
+        Voxel x voxel x voxel boolean mask indicating elements that contain data, passed as non-nan mask parameter
+        in the searchlight function.
+
+    :param nevents: int, optional
+        Specify number of boundaries to test.
+
+    :param subj_regex: string, optional
+        Regular expression identifying all data file names.
+
+    :return vox3d_rep1: ndarray
+        Repetition 1's 3d voxel map of AUC results
+
+    :return vox3d_lastreps: ndarray
+        Last repetitions' average's 3d voxel map of AUC results
+
+    :return vox_AUCdiffs: ndarray
+        AUC results of repetition 1 - last repetitions.
+
+
+    """
 
 
     Resamp = Dataset(data_fpath)
