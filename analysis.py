@@ -117,7 +117,7 @@ def FDR_p(pvals):
     return qvals
 
 
-def lag_correlation(x, y, max_lags, corr_type='Pearson'):
+def lag_correlation(x, y, max_lags):
 
     assert max_lags < min(len(x), len(y)) / 2, "max_lags exceeds half the length of smallest array"
 

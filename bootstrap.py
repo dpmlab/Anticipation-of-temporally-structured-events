@@ -4,7 +4,6 @@ from copy import deepcopy
 from time import time
 
 from utils.Dataset import Dataset, get_repdata, get_maskdata, get_non_nan_mask
-from utils.labels import get_label
 import nibabel as nib
 
 from s_light import s_light, get_vox_map
@@ -13,81 +12,129 @@ from trial_jointfit import tj_fit
 from scipy.stats import pearsonr
 
 
-def bootstrap(n_resamp, condition, data_fpath, mask, subj_regex, subjs=[], randomize=False):
+def bootstrap(n_resamp, data_fpath, mask, subj_regex, subjs=[], randomize=True, label='Intact', percent_cpu=0.75):
+
+    # EXCEPTION HANDLING: do not let users use more than 90% of CPUs... #
+
+    """
+
+    Generate a bootstrap distribution of HMM fits on resampled data.
+
+    Uses multiprocessing to complete bootstrap computations in parallel.
+
+    :param n_resamp: int
+        Number of times to resample original dataset for the bootstrap distribution.
+
+    :param data_fpath: string
+        Name of filepath pointing to the directory in which the data for bootstrapping is stored.
+
+    :param mask: array_like
+        Voxel x voxel x voxel boolean mask indicating elements that contain data, passed as non-nan mask parameter
+        in the searchlight function.
+
+    :param subj_regex: string
+        Regular expression identifying all data file names.
+
+    :param subjs: list, optional
+        Option for manually indicating subjects to be considered for bootstrapping.
+
+    :param randomize: boolean, optional
+        Allows for resampling, with replacement, from the original dataset. Set to False if manually adding subjs.
+
+    :param label: string, optional
+        Used to identify subject files by condition (e.g. 'Intact' vs 'SFix' in GBH dataset).
+
+    :param percent_cpu: float, optional
+        Amount of CPUs to use in multiprocessing. 0.75 corresponds to 75%. Cannot exceed 90% CPU usage.
+
+    :return resamp_aucs_rep1: ndarray
+        Bootstrapped AUC (Area Under the Curve) results for the first repetition.
+
+    :return resamp_aucs_last: ndarray
+        Bootstrapped AUC results for the last repetitions.
+
+    :return resamp_aucs_diff: ndarray
+        Bootstrapped results of the last repetition's AUC minus first (resamp_aucs_last - resamp_aucs_last).
+
+    :return resamped_subjs: list
+        A list of the subjects used in each bootstrap.
+
+    """
 
     if len(subjs) > 0:
         subjects = deepcopy(subjs)
     else:
         subjects = [subjdir for subjdir in os.listdir(data_fpath) if fnmatch.fnmatch(subjdir, subj_regex)]
 
-    label = get_label(condition)
-
     resamped_subjs = []
-
     results = []
 
-    cpus = math.floor(mp.cpu_count() * .75)
+    cpus = math.floor(mp.cpu_count() * percent_cpu)
     pool = mp.Pool(processes=cpus)
 
     time_start = time()
 
-    # for resamp in range(n_resamp):
-    #     process = mp.Process(target=resample, args=(subjects, data_fpath, label, mask))
-    #     processes.append(process)
-    #     process.start()
-
     for resamp in range(n_resamp):
+
         if randomize:
-            resamp_subjs = rand_subjs(subjects)
+            resamp_subjs = [random.choice(subjects) for subject in range(len(subjects))]
             resamped_subjs.append(resamp_subjs)
+
         else:
             resamp_subjs = deepcopy(subjects[resamp])
-        process = pool.apply(resample, args=(resamp_subjs, data_fpath, label, mask))
+
+        process = pool.apply(slight_aucs, args=(resamp_subjs, data_fpath, label, mask))
         results.append(process)
-
-    # results = [pool.apply(resample, args=(subjects, data_fpath, label, mask)) for resamp in n_resamp]
-
-    # start processes #
-    # for process in processes:
-    #     process.start()
-
-    # return processes #
-    # for process in processes:
-    #     process.join()
-
-    # results = [output.get() for process in processes]
 
     time_end = time()
 
     print("total time for {} resamplings = {} minutes".format(n_resamp, round((time_end - time_start) / 60, 4)))
-
-    # for sample in range(num_resamp):
-    #
-    #     vox3d_rep1, vox3d_lastreps, vox_AUCdiffs = resample(subjects, fpath, label, mask.data)
-    #
-    #     resamp_aucs_rep1.append(vox3d_rep1)
-    #     resamp_aucs_last.append(vox3d_lastreps)
-    #     resamp_aucs_diff.append(vox_AUCdiffs)
-
-    # return results: range of diffs, is in conf int, etc.
 
 
     resamp_aucs_rep1 = np.array(results)[:, 0, :, :, :]
     resamp_aucs_last = np.array(results)[:, 1, :, :, :]
     resamp_aucs_diff = np.array(results)[:, 2, :, :, :]
 
-    # arr_to_hdf5('subjs_bootstrap_' + condition + str(date.today()), np.array(results)[3])
-
-    # arr_to_nii('avg_diffs_resamps.nii', header_file_fpath, np.nanmean(resamp_aucs_diff, axis=0))
-
     return resamp_aucs_rep1, resamp_aucs_last, resamp_aucs_diff, resamped_subjs
 
 
-def rand_subjs(subjs):
-    return [random.choice(subjs) for subj in range(len(subjs))]
+def slight_aucs(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pred*'):
+
+    """
+
+    Executes searchlight analysis on bootstrapped datasets, and computes AUCs for HMM fits.
+
+    :param subjects: list
+        List of subjects to include in the HMM fit.
+
+    :param data_fpath: string
+        Name of filepath pointing to the directory in which the data is stored.
+
+    :param label: string
+        Used to identify subject files by condition (e.g. 'Intact' vs 'SFix' in GBH dataset).
+
+    :param mask_data: array_like
+        Voxel x voxel x voxel boolean mask indicating elements that contain data, passed as non-nan mask parameter
+        in the searchlight function.
+
+    :param nevents: int, optional
+        Specify number of boundaries to test.
+
+    :param subj_regex: string, optional
+        Regular expression identifying all data file names.
+
+    :return vox3d_rep1: ndarray
+        Repetition 1's 3d voxel map of AUC results
+
+    :return vox3d_lastreps: ndarray
+        Last repetitions' average's 3d voxel map of AUC results
+
+    :return vox_AUCdiffs: ndarray
+        AUC results of repetition 1 - last repetitions.
 
 
-def resample(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pred*'):
+    """
+
 
     Resamp = Dataset(data_fpath)
     Resamp.data = get_repdata(Resamp.fpath, subj_regex, 'filt*' + label + '*', subjs=subjects)
@@ -103,39 +150,58 @@ def resample(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*pre
 
     return vox3d_rep1, vox3d_lastreps, vox_AUCdiffs
 
-def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, n_subjs=30):
 
-    # if len(subjs) > 0:
-    #     subjects = deepcopy(subjs)
-    # else:
-    #     subjects = [subjdir for subjdir in os.listdir(data_fpath) if fnmatch.fnmatch(subjdir, subj_regex)]
+def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, ev_annot, n_subjs=30, n_ev_subjs=14, percent_cpu=0.75):
+
+    """
+
+    Generate a bootstrap distribution of lag correlations on resampled data.
+
+    Uses multiprocessing to complete bootstrap computations in parallel.
+
+    :param n_resamp: int
+        Number of times to resample original dataset for the bootstrap distribution.
+
+    :param dil_cluster_mask_fpath: string
+        Mask of clusters of dilated ROIs using binary_dilation from scipy.ndimage.morphology
+
+    :param cluster_mask_fpath: string
+        Mask of clusters of undilated ROIS.
+
+    :param ev_annot: ndarray
+        An list of event boundaries annotated by viewers. Boundaries correspond to time in seconds.
+
+    :param n_subjs: int, optional
+        Number of subjects included in fMRI dataset (main analysis).
+
+    :param n_ev_subjs: int, optional
+        Number of subjects included in event annotation dataset.
+
+    :param percent_cpu: float, optional
+        Amount of CPUs to use in multiprocessing. 0.75 corresponds to 75%. Cannot exceed 90% CPU usage.
+
+    :return first_lag0corr: ndarray
+        Bootstrapped lag correlation results comparing the first viewing to no lag.
+
+    :return lasts_lag0corr: ndarray
+        Bootstrapped lag correlation results comparing the last viewings to no lag.
+
+    :return dil_first_lag0corr: ndarray
+        Bootstrapped lag correlation results comparing the first viewing to no lag (using dilated ROIS).
+
+    :return dil_lasts_lag0corr: ndarray
+        Bootstrapped lag correlation results comparing the last viewings to no lag (using dilated ROIS).
+
+
+    """
 
     results = []
 
-    cpus = math.floor(mp.cpu_count() * .75)
+    cpus = math.floor(mp.cpu_count() * percent_cpu)
     pool = mp.Pool(processes=cpus)
 
-    # time_start = time()
-
-    ev_annot = np.asarray(
-        [5, 12, 54, 77, 90,
-         3, 12, 23, 30, 36, 43, 50, 53, 78, 81, 87, 90,
-         11, 23, 30, 50, 74,
-         1, 55, 75, 90,
-         4, 10, 53, 77, 82, 90,
-         11, 54, 77, 81, 90,
-         12, 22, 36, 54, 78,
-         12, 52, 79, 90,
-         10, 23, 30, 36, 43, 50, 77, 90,
-         13, 55, 79, 90,
-         4, 10, 23, 29, 35, 44, 51, 56, 77, 80, 85, 90,
-         11, 55, 78, 90,
-         11, 30, 43, 54, 77, 90,
-         4, 11, 24, 30, 38, 44, 54, 77, 90]
-    )
-
     ev_annot_frequencies = ev_annot_freq(ev_annot)
-    ev_annot_convolved = hrf_convolution(ev_annot_frequencies, 14)
+    ev_annot_convolved = hrf_convolution(ev_annot_frequencies, n_ev_subjs)
 
     roi_dilated = np.asarray(nib.load(dil_cluster_mask_fpath).get_fdata())
     roi_clusters = np.asarray(nib.load(cluster_mask_fpath).get_fdata())
@@ -153,6 +219,46 @@ def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, n_s
 
 
 def lag0_corr(subj_idxs, n_rois, roi_dilated, roi_clusters, ev_conv, vox_map_shape=(121, 145, 121)):
+
+    """
+    Performs a lag correlation between fMRI data and hand-annotated event data.
+
+    Correlates convolutions of event annotations (organized as frequency of events over time in seconds) and brain HMM fits.
+
+    Uses both dilated and undilated ROIs, all of which survived FDR correction on the main analysis.
+
+    :param subj_idxs: list
+        List of subject indices. Used to return ROI data.
+
+    :param n_rois: int
+        Number of ROIs.
+
+    :param roi_dilated: array_like
+        Mask of dilated ROIs.
+
+    :param roi_clusters: array_like
+        Mask of ROI clusters.
+
+    :param ev_conv: array_like
+        Event boundaries convolved with the HRF
+
+    :param vox_map_shape: tuple of ints, optional
+        Shape of the input voxel map.
+
+    :return first_lag0corr: ndarray
+        Lag correlation results comparing the first viewing to no lag.
+
+    :return lasts_lag0corr: ndarray
+        Lag correlation results comparing the last viewings to no lag.
+
+    :return dil_first_lag0corr: ndarray
+        Lag correlation results comparing the first viewing to no lag (using dilated ROIS).
+
+    :return dil_lasts_lag0corr: ndarray
+        Lag correlation results comparing the last viewings to no lag (using dilated ROIS).
+
+
+    """
 
     from utils.Dataset import get_roidata
 
@@ -190,9 +296,6 @@ def lag0_corr(subj_idxs, n_rois, roi_dilated, roi_clusters, ev_conv, vox_map_sha
 
         dil_dts_first = get_DTs(dil_segs[0])
         dil_dts_lasts = get_DTs(dil_segs[1])
-
-        temp1 = pearsonr(dil_dts_first, ev_conv[1:])[0]
-        temp2 = pearsonr(dil_dts_lasts, ev_conv[1:])[0]
 
         dil_first_lag0corr[dilated_mask] = pearsonr(dil_dts_first, ev_conv[1:])[0]
         dil_lasts_lag0corr[dilated_mask] = pearsonr(dil_dts_lasts, ev_conv[1:])[0]
