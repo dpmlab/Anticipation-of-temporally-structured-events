@@ -60,9 +60,6 @@ def get_percent_pos_neg(resamps):
     return sum(resamps > 0), sum(resamps < 0)
 
 
-
-
-
 def get_pdf(original_samp, mean_resamps, std_resamps):
     return round(norm.pdf(original_samp, mean_resamps, std_resamps), 6)
 
