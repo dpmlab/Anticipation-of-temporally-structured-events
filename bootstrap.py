@@ -151,7 +151,7 @@ def slight_aucs(subjects, data_fpath, label, mask_data, nevents=7, subj_regex='*
     return vox3d_rep1, vox3d_lastreps, vox_AUCdiffs
 
 
-def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, ev_annot, n_subjs=30, n_ev_subjs=14, percent_cpu=0.75):
+def bootstrap_lagcorrs(n_resamp, roi_dilated, roi_clusters, ev_annot, n_subjs=30, n_ev_subjs=14, percent_cpu=0.75):
 
     """
 
@@ -162,10 +162,10 @@ def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, ev_
     :param n_resamp: int
         Number of times to resample original dataset for the bootstrap distribution.
 
-    :param dil_cluster_mask_fpath: string
+    :param roi_dilated: array_like
         Mask of clusters of dilated ROIs using binary_dilation from scipy.ndimage.morphology
 
-    :param cluster_mask_fpath: string
+    :param roi_clusters: array_like
         Mask of clusters of undilated ROIS.
 
     :param ev_annot: ndarray
@@ -202,9 +202,6 @@ def bootstrap_lagcorrs(n_resamp, dil_cluster_mask_fpath, cluster_mask_fpath, ev_
 
     ev_annot_frequencies = ev_annot_freq(ev_annot)
     ev_annot_convolved = hrf_convolution(ev_annot_frequencies, n_ev_subjs)
-
-    roi_dilated = np.asarray(nib.load(dil_cluster_mask_fpath).get_fdata())
-    roi_clusters = np.asarray(nib.load(cluster_mask_fpath).get_fdata())
 
     n_rois = int(np.amax(roi_dilated))
 
