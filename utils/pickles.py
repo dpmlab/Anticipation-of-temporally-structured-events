@@ -13,15 +13,7 @@ def arr_to_nii(new_fpath, fpath_nii, data):
 
     img = nib.load(fpath_nii)
     new_img = nib.Nifti1Image(data, img.affine, img.header)
-    #temp_img = nib.Nifti1Image(array, np.eye(eye), header=head)
-    #nib.save(nib.Nifti1Image(temp_img, np.eye(eye)), fpath)
     nib.save(new_img, new_fpath)
-
-    # fpath = 'MNI152_T1_brain_resample.nii'
-    # temp_nan = np.asarray(hdf5_to_arr('dset_int_nan.h5'))
-    # img = nib.load(fpath)
-    # new_img = nib.Nifti1Image(temp_nan, img.affine, img.header)
-    # nib.save(new_img, 'temp_nib.nii')
 
 
 def arr_to_hdf5(fpath, data):
