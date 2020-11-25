@@ -1,81 +1,47 @@
 import numpy as np
 from copy import deepcopy
-from scipy.stats import norm, kstest, pearsonr
+from scipy.stats import pearsonr, norm
 
 
 def get_AUCs(nevents, reps, segs):
+
+    """
+
+    :param nevents: int
+
+    :param reps: int
+
+    :param segs: ndarray
+
+    :return auc: ndarray
+
+    """
 
     auc = [round(np.dot(segs[rep], np.arange(nevents)).sum(), 2) for rep in range(reps)]
 
     return np.asarray(auc)
 
 
-def get_conf_int(original_samp, resamps, conf_per=95):
-
-    resamps_sorted = deepcopy(resamps)
-    resamps_sorted = np.sort(resamps_sorted, kind='mergesort')
-
-    n_lessthan0 = np.count_nonzero(resamps_sorted < 0)
-    idx_conf_min_val = int(((100 - conf_per) / 100) * len(resamps_sorted))
-    conf_min_val = resamps_sorted[idx_conf_min_val]
-    samp_5 = resamps_sorted[4]
-
-
-    # if n_lessthan0 >= int(100 - conf_per):
-    # if n_lessthan0 >= int(((100 - conf_per) / 100) * len(resamps_sorted)):
-    #     return [np.nan, (np.nan, np.nan), n_lessthan0, conf_min_val, np.nan, np.nan, np.nan, np.round((n_lessthan0/len(resamps_sorted)), 6)]
-
-    crit_val = ((100 - conf_per) / 2) / 100
-
-    idx_low = int(len(resamps_sorted) * crit_val)
-    idx_hi = int(len(resamps_sorted) - idx_low) - 1
-
-    conf_int = (resamps_sorted[idx_low], resamps_sorted[idx_hi])
-
-    pval = np.round((n_lessthan0/len(resamps_sorted)), 6)
-
-    is_withinConf_Int = False
-    if (original_samp > conf_int[0]) and (original_samp < conf_int[1]):
-        is_withinConf_Int = True
-
-    if n_lessthan0 == 0:
-        return [is_withinConf_Int, conf_int, n_lessthan0, conf_min_val, np.mean(resamps_sorted[int(100 - conf_per):]),
-                np.std(resamps_sorted[int(100 - conf_per):]), np.var(resamps_sorted[int(100 - conf_per):]),
-                0.000001, samp_5]
-    else:
-        return [is_withinConf_Int, conf_int, n_lessthan0, conf_min_val, np.mean(resamps_sorted[int(100 - conf_per):]), np.std(resamps_sorted[int(100 - conf_per):]), np.var(resamps_sorted[int(100 - conf_per):]), np.round((n_lessthan0/len(resamps_sorted)), 6), samp_5]
-
-def get_confval(resamps):
-
-    resamps_sorted = deepcopy(resamps)
-    resamps_sorted = np.sort(resamps_sorted, kind='mergesort')
-
-    samp_5 = resamps_sorted[4]
-
-    return samp_5
-
-
-def get_percent_pos_neg(resamps):
-
-    return sum(resamps > 0), sum(resamps < 0)
-
-
-def get_pdf(original_samp, mean_resamps, std_resamps):
-    return round(norm.pdf(original_samp, mean_resamps, std_resamps), 6)
-
-
 def get_sf(original_samp, mean_resamps, std_resamps):
     return round(norm.sf(original_samp, mean_resamps, std_resamps), 6)
+
 
 def get_CV_sf(mean_resamps, std_resamps):
     return round(norm.sf(mean_resamps/std_resamps), 6)
 
-def get_ks_test(resamps, pval=.05):
-    is_norm = kstest(resamps, 'norm', args=(np.mean(resamps), np.std(resamps)))[1] < pval
-    return is_norm
+
+def get_percent_pos_neg(resamps):
+    return sum(resamps > 0), sum(resamps < 0)
 
 
 def FDR_p(pvals):
+
+    """
+
+    :param pvals: array_like
+
+    :return:
+    """
 
     # Written by Chris Baldassano (git: cbaldassano), given permission to adapt into my code on 04/18/2019 #
 
@@ -116,6 +82,17 @@ def FDR_p(pvals):
 
 def lag_correlation(x, y, max_lags):
 
+    """
+
+    :param x: array_like
+
+    :param y: array_like
+
+    :param max_lags: int
+
+    :return:
+    """
+
     assert max_lags < min(len(x), len(y)) / 2, "max_lags exceeds half the length of smallest array"
 
     assert len(x) == len(y), "array lengths are not equal"
@@ -135,11 +112,37 @@ def lag_correlation(x, y, max_lags):
 
 def ev_annot_freq(ev_annots):
 
+    """
+
+    :param ev_annots: ndarray
+
+    :return:
+    """
+
     frequencies = np.bincount(ev_annots)
     return np.array(frequencies[1:], dtype=np.float64)
 
 
 def hrf_convolution(ev_annots_freq, n_participants, dts=np.arange(0, 15), pp=8.6, qq=0.547, TR=1.5, nTR=60):
+
+    """
+
+    :param ev_annots_freq: ndarray
+
+    :param n_participants: int
+
+    :param dts: ndarray, optional
+
+    :param pp: float, optional
+
+    :param qq: float, optional
+
+    :param TR: float, optional
+
+    :param nTR: int, optional
+
+    :return:
+    """
 
     X = deepcopy(ev_annots_freq)
     X /= n_participants
@@ -155,6 +158,19 @@ def hrf_convolution(ev_annots_freq, n_participants, dts=np.arange(0, 15), pp=8.6
 
 
 def get_DTs(ev_segs, nTR=60, n_events=7):
+
+    """
+
+
+
+    :param ev_segs: ndarray
+
+    :param nTR: int, optional
+
+    :param n_events: int, optional
+
+    :return:
+    """
 
     evs = np.dot(ev_segs, np.arange(n_events))
 

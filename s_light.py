@@ -133,7 +133,7 @@ def get_vox_map(SL_results, SL_voxels, non_nan_mask):
 def individual_sl_res(data, non_nan_mask, x, y, z, radius=5, min_vox=20):
 
     """
-    Fits HMM to an individual searchlight to extract event boundaries from first and averaged last viewings.
+    Fits HMM to an individual searchlight to extract event boundaries from first and averaged-last viewings.
 
     Masks nan values in dataset before execution.
 
