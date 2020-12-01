@@ -1,54 +1,39 @@
 from copy import deepcopy
+import time
 import numpy as np
 from scipy.spatial.distance import cdist
-import time
-from trial_jointfit import tj_fit
-from utils.pickles import arr_to_hdf5
+from utils import get_AUCs, tj_fit, save_nii
 
 
-def s_light(data, non_nan_mask, stride=5, radius=5, min_vox=20, save_res=False, f_name=''):
+def s_light(dataset, stride=5, radius=5, min_vox=20):
+    """Fits HMM to searchlights jointly to first and averaged last viewings.
 
-    """
-    Fits HMM to searchlights to extract event boundaries from first and averaged last viewings.
+    Executes searchlight analysis on voxel x voxel x voxel data, for all
+    non_nan voxels. Stride and radius are used to adjust searchlight size and
+    movement, and only searchlights with a number of valid voxels above a
+    minimum size are run.
 
-    Executes searchlight analysis on voxel x voxel x voxel data.
-
-    Masks nan values in dataset before execution.
-
-    Stride and radius are used to adjust searchlight size and movement.
-
-    Minimum number of voxels per searchlight can be specified.
-
-    Saves searchlight results and voxels as npy files. Use numpy.load(<file name>, allow_pickle=True) to unpickle.
-
-    :param data: array_like
-        Voxel x voxel x voxel data for searchlight analysis.
-
-    :param non_nan_mask: array_like
-        Voxel x voxel x voxel boolean mask indicating elements that contain data.
-
-    :param stride: int, optional
+    Parameters
+    ----------
+    dataset : Dataset
+        Data and mask for searchlight analysis
+    stride : int, optional
         Specifies amount by which searchlights move across data
-
-    :param radius: int, optional
+    radius : int, optional
         Specifies radius of each searchlight
-
-    :param min_vox: int, optional
+    min_vox : int, optional
         Indicates the minimum number of elements with data for each searchlight
 
-    :param save_res: bool, optional
-        Set to True in order to save searchlight results and voxels as npy files.
-
-    :return SL_results: list
-            Results of HMM fits on searchlights
-
-    :return SL_allvox: list
-            Voxels in each searchlight
-
+    Returns
+    -------
+    SL_results : list
+        Results of HMM fits on searchlights
+    SL_allvox : list
+        Voxels in each searchlight
     """
-    coords = np.transpose(np.where(non_nan_mask))
-    d = np.asarray(deepcopy(data))
-    d = d[:, :, non_nan_mask]
+    coords = np.transpose(np.where(dataset.non_nan_mask))
+    d = np.asarray(deepcopy(dataset.data))
+    d = d[:, :, dataset.non_nan_mask]
 
     SL_allvox = []
 
@@ -57,49 +42,47 @@ def s_light(data, non_nan_mask, stride=5, radius=5, min_vox=20, save_res=False, 
     for x in range(0, np.max(coords, axis=0)[0] + stride, stride):
         for y in range(0, np.max(coords, axis=0)[1] + stride, stride):
             for z in range(0, np.max(coords, axis=0)[2] + stride, stride):
-
-
-                distances = cdist(coords, np.array([x,y,z]).reshape((1, 3)))[:, 0]
-                SL_vox = np.where(distances <= radius)[0]
+                dists = cdist(coords, np.array([[x, y, z]]))[:, 0]
+                SL_vox = np.where(dists <= radius)[0]
                 if len(SL_vox) >= min_vox:
                     SL_allvox.append(SL_vox)
 
     res_start = time.time()
 
-    print("time in minutes to get searchlight voxels = ", round((res_start - sl_vox_start) / 60, 3))
+    print("Time in minutes to get searchlight voxels = ",
+          round((res_start - sl_vox_start) / 60, 3))
 
     SL_results = [tj_fit(d[:, :, sl]) for sl in SL_allvox]
 
-    if save_res:
-        np.save('sl_res_' + f_name + '.npy', SL_results)
-        np.save('sl_allvox_' + f_name + '.npy', SL_allvox)
-
     res_end = time.time()
-    print("time in minutes to get searchlight results = ", round((res_end - res_start) / 60, 3))
+    print("Time in minutes to get searchlight results = ",
+          round((res_end - res_start) / 60, 3))
 
     return SL_results, SL_allvox
 
 
 def get_vox_map(SL_results, SL_voxels, non_nan_mask):
 
-    """
-    Projects results of HMM fits from the searchlight analysis to voxel maps.
+    """Projects searchlight results to voxel maps.
 
-    :param SL_results: array_like
+    Parameters
+    ----------
+    SL_results: list
         Results of the searchlight analysis from s_light function.
 
-    :param SL_voxels: array_like
+    SL_voxels: list
         Voxel information from searchlight analysis
 
-    :param non_nan_mask: array_like
-        Voxel x voxel x voxel boolean mask indicating elements that contain data.
+    non_nan_mask: ndarray
+        Voxel x voxel x voxel boolean mask indicating elements containing data
 
-    :return voxel_3dmap_rep1: ndarray
+    Returns
+    -------
+    voxel_3dmap_rep1 : ndarray
         Repetition 1's 3d voxel map of results
 
-    :return voxel_3dmap_lastreps: ndarray
-        Last repetitions' average's 3d voxel map of results
-
+    voxel_3dmap_lastreps : ndarray
+        Last repetitions' 3d voxel map of results
     """
 
     coords = np.transpose(np.where(non_nan_mask))
@@ -119,69 +102,35 @@ def get_vox_map(SL_results, SL_voxels, non_nan_mask):
     voxel_3dmap_rep1 = np.full(non_nan_mask.shape, np.nan)
     voxel_3dmap_lastreps = np.full(non_nan_mask.shape, np.nan)
 
-    for idx, result in enumerate(voxel_map_rep1):
+    for i, result in enumerate(voxel_map_rep1):
 
-        if result == 0 and voxel_map_lastreps[idx] == 0:
+        if result == 0 and voxel_map_lastreps[i] == 0:
             continue
 
-        voxel_3dmap_rep1[coords[idx][0], coords[idx][1], coords[idx][2]] = result
-        voxel_3dmap_lastreps[coords[idx][0], coords[idx][1], coords[idx][2]] = voxel_map_lastreps[idx]
+        voxel_3dmap_rep1[coords[i][0], coords[i][1], coords[i][2]] = result
+        voxel_3dmap_lastreps[coords[i][0], coords[i][1], coords[i][2]] = \
+            voxel_map_lastreps[i]
 
     return voxel_3dmap_rep1, voxel_3dmap_lastreps
 
 
-def individual_sl_res(data, non_nan_mask, x, y, z, radius=5, min_vox=20):
+def run_s_light_auc(dataset, savename, header_fpath):
+    """Runs searchlight on dataset and save AUC difference.
 
-    """
-    Fits HMM to an individual searchlight to extract event boundaries from first and averaged-last viewings.
-
-    Masks nan values in dataset before execution.
-
-    Minimum number of voxels per searchlight can be specified.
-
-    Saves searchlight result and voxels as npy files. Use numpy.load(<file name>, allow_pickle=True) to unpickle.
-
-    :param data: array_like
-        Voxel x voxel x voxel data for searchlight analysis.
-
-    :param non_nan_mask: array_like
-        Voxel x voxel x voxel boolean mask indicating elements that contain data.
-
-    :param x: int
-        x coordinate of individual searchlight
-
-    :param y: int
-        y coordinate of individual searchlight
-
-    :param z: int
-        z coordinate of individual searchlight
-
-    :param radius: int, optional
-        Specifies radius of individual searchlight
-
-    :param min_vox: int, optional
-        Indicates the minimum number of elements with data for the searchlight
-
-    :return SL_results: list
-        Results of HMM fits on individual searchlight
-
-    :return SL_allvox: list
-            Voxels in searchlight
-
+    Parameters
+    ----------
+    dataset : Dataset
+        Data and mask for searchlight analysis
+    savename: string
+        Filename to save nifti result to
+    header_fpath : string
+        File to use as a nifti template
     """
 
-    coords = np.transpose(np.where(non_nan_mask))
-    d = np.asarray(deepcopy(data))
-    d = d[:, :, non_nan_mask]
+    sl_res, sl_vox = s_light(dataset)
+    sl_aucs = [get_AUCs(segs) for segs in sl_res]
+    vox3d_rep1, vox3d_lastreps = get_vox_map(sl_aucs, sl_vox,
+                                             dataset.non_nan_mask)
+    vox_AUCdiffs = vox3d_lastreps - vox3d_rep1
 
-    SL_allvox = []
-
-    distances = cdist(coords, np.array([x, y, z]).reshape((1,3)))[:, 0]
-    SL_vox = np.where(distances <= radius)[0]
-
-    if len(SL_vox) >= min_vox:
-        SL_allvox.append(SL_vox)
-
-    SL_results = [tj_fit(d[:, :, sl]) for sl in SL_allvox]
-
-    return SL_results, SL_allvox
+    save_nii(savename, header_fpath, vox_AUCdiffs)
