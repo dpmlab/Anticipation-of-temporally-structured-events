@@ -1,7 +1,5 @@
 import glob
 from copy import deepcopy
-import multiprocessing as mp
-import math
 import random
 from scipy.ndimage.morphology import binary_dilation
 from scipy.ndimage.measurements import label
@@ -16,8 +14,6 @@ data_fpath = '../data/'
 output_fpath = '../outputs/'
 subjects = glob.glob(data_fpath + '*pred*')
 header_fpath = '../data/0411161_predtrw02/filtFuncMNI_Intact_Rep5.nii'
-cpus = math.floor(mp.cpu_count() * 0.75)
-pool = mp.Pool(processes=cpus)
 
 
 # Load full (non-bootstrapped) dataset
@@ -37,10 +33,7 @@ for resamp in range(n_resamp):
     dset = Dataset(data_fpath, resamp_subjs, 'filt*Intact*')
     dset.non_nan_mask = valid_vox
     bootpath = output_fpath + 'boot/AUC_boot' + str(resamp) + '.nii'
-    pool.apply_async(run_s_light_auc,
-        args=(deepcopy(dset), deepcopy(bootpath), header_fpath))
-
-pool.join()
+    run_s_light_auc(dset, bootpath, header_fpath)
 bootstrap_stats(output_fpath + 'boot/AUC_boot*.nii',
                 output_fpath + 'AUC_q.nii')
 
@@ -70,10 +63,7 @@ for resamp in range(n_resamp):
     dset = Dataset(data_fpath, resamp_subjs, 'filt*Intact*')
     dset.non_nan_mask = valid_vox
     bootpath = output_fpath + 'lagcorr_boot' + str(resamp)
-    pool.apply_async(lag_corr,
-                     args=(deepcopy(dset), rois, ev_conv, max_lag,
-                           header_fpath, deepcopy(bootpath)))
-pool.join()
+    lag_corr(dset, rois, ev_conv, max_lag, header_fpath, bootpath)
 bootstrap_stats(output_fpath + 'boot/lagcorr_boot*first.nii',
                 output_fpath + 'lagcorr_first_p.nii', use_z = False)
 bootstrap_stats(output_fpath + 'boot/lagcorr_boot*lasts.nii',

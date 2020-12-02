@@ -5,7 +5,7 @@ The code in this repository can be used to reproduce the results of (Lee, Aly, a
 This code was originally run with:
 Python version: 3.6.1
 Anaconda version: 4.5.5
-Backend/analysis dependencies: numpy, brainiak, scipy, nibabel, glob
+Backend/analysis dependencies: numpy, brainiak, scipy, nibabel
 
 
 

@@ -52,6 +52,7 @@ def s_light(dataset, stride=5, radius=5, min_vox=20):
     print("Time in minutes to get searchlight voxels = ",
           round((res_start - sl_vox_start) / 60, 3))
 
+    print("Running " + str(len(SL_allvox)) + " searchlights")
     SL_results = [tj_fit(d[:, :, sl]) for sl in SL_allvox]
 
     res_end = time.time()
