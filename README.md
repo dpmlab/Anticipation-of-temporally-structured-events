@@ -2,6 +2,8 @@
 
 The code in this repository can be used to reproduce the results of (Lee, Aly, and Baldadssano. (2020). "Anticipation of temporally structured events in the brain")[https://doi.org/10.1101/2020.10.14.338145]
 
+Data from ["Learning Naturalistic Temporal Structure in the Posterior Medial Network"](https://openneuro.org/datasets/ds001545/versions/1.1.1) was preprocessed using FSL as specified in preproc01.fsf. All the results reported in the manuscript can be reproduced by running main.py. Note that running all the bootstraps will be take substantial time (days), and you may want to modify these loops to take advantage of parallel processing resources available on your system.
+
 This code was originally run with:
 Python version: 3.6.1
 Anaconda version: 4.5.5
