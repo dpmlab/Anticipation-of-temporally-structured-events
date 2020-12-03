@@ -281,7 +281,7 @@ def bootstrap_stats(boot_regex, savename, use_z = True):
         p = norm.sf(mean_d/std_d)
         p = FDR_p(p)
     else:
-        p = np.mean(d[valid_vox] > 0, axis=1)
+        p = np.mean(d[valid_vox] < 0, axis=1)
 
     vox_p = np.full(d.shape[:3], np.nan)
     vox_p[valid_vox] = p
