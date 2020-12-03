@@ -32,7 +32,7 @@ def s_light(dataset, stride=5, radius=5, min_vox=20):
         Voxels in each searchlight
     """
     coords = np.transpose(np.where(dataset.non_nan_mask))
-    d = np.asarray(deepcopy(dataset.data))
+    d = deepcopy(dataset.data)
     d = d[:, :, dataset.non_nan_mask]
 
     SL_allvox = []

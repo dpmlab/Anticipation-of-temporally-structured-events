@@ -273,7 +273,7 @@ def bootstrap_stats(boot_regex, savename, use_z = True):
     """
     bfiles = glob.glob(boot_regex)
     d = np.stack([nib.load(f).get_fdata() for f in bfiles], axis=-1)
-    valid_vox = d.sum(3) > 0
+    valid_vox = ~np.all(np.isnan(d), axis=3)
 
     if use_z:
         mean_d = d[valid_vox].mean(1)
@@ -283,9 +283,9 @@ def bootstrap_stats(boot_regex, savename, use_z = True):
     else:
         p = np.mean(d[valid_vox] > 0, axis=1)
 
-    vox_p = np.zeros(d.shape[:3])
+    vox_p = np.full(d.shape[:3], np.nan)
     vox_p[valid_vox] = p
-    save_nii(savename, bfiles[0], vox_p)
+    save_nii(savename, bfiles[0], vox_p.T)
 
 def mask_nii(fpath, mask_path, savename, threshold=0.05):
     """Mask a nii file using a statistical map
@@ -302,5 +302,7 @@ def mask_nii(fpath, mask_path, savename, threshold=0.05):
         Statistical threshold for mask
     """
     mask = nib.load(mask_path).get_fdata() < threshold
-    d = nib.load(fpath).get_fdata() * mask
-    save_nii(savename, fpath, d)
+    d = nib.load(fpath).get_fdata()
+    d_masked = np.full(d.shape, np.nan)
+    d_masked[mask] = d[mask]
+    save_nii(savename, fpath, d_masked.T)

@@ -61,7 +61,7 @@ class Dataset:
             D_num_not_nan.append(D_not_nan.T)
         print(' ')
 
-        self.data = D
+        self.data = np.asarray(D)
         non_nan_mask = np.min(D_num_not_nan, axis=0) # Min across reps
         MNI_mask = nib.load(MNI_mask_path).get_fdata().astype(bool).T
         self.non_nan_mask = (non_nan_mask > (min_subjs - 1)) * MNI_mask

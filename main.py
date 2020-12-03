@@ -42,11 +42,11 @@ mask_nii(savepath, output_fpath + 'AUC_q.nii', output_fpath + 'AUC_q05.nii')
 
 
 # Identify significant clusters
-AUC_results = nib.load(output_fpath + 'AUC_q.nii').get_fdata()
+AUC_results = nib.load(output_fpath + 'AUC_q05.nii').get_fdata()
 clusters = label(AUC_results, structure=np.ones((3, 3, 3)))[0]
 rois = binary_dilation(clusters,
                        structure=np.ones((5, 5, 5), dtype=bool)).astype(int)
-rois = label(rois, structure=np.ones((3, 3, 3)))
+rois = label(rois, structure=np.ones((3, 3, 3)))[0]
 
 
 # Run lag correlation analysis

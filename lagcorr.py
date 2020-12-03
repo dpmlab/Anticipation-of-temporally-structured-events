@@ -38,6 +38,7 @@ def lag_corr(dataset, roi_clusters, ev_conv, max_lag,
     first_lagcorr = np.full(shape=vox_map_shape, fill_value=np.nan)
     lasts_lagcorr = np.full(shape=vox_map_shape, fill_value=np.nan)
 
+    print('Computing lag correlations for ' + str(n_rois) + ' clusters')
     for cluster in range(1, n_rois + 1):
         mask = roi_clusters == cluster
 
