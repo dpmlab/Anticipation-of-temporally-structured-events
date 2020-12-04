@@ -52,25 +52,33 @@ rois = label(rois, structure=np.ones((3, 3, 3)))[0]
 
 # Save ROI datasets
 save_rois(data_fpath, subjects, 'filt*Intact*', rois > 0,
-          '../outputs/rois/')
+          output_fpath + 'rois/')
 
 # Run lag correlation analysis
 max_lag = 7
 ev_conv = hrf_convolution(ev_annot_freq())
-dset.load_rois('../outputs/rois/', subjects)
+dset.load_rois(output_fpath + 'rois/', subjects)
 first_lagcorr, lasts_lagcorr = lag_corr(dset, rois, ev_conv, max_lag,
                                         header_fpath, output_fpath + 'lagcorr')
 
+n_rois = int(np.max(rois))
+cluster_lagcorrs = np.zeros((2, n_rois, 1 + 2*max_lag))
+for cluster in range(1, n_rois + 1):
+    mask = rois == cluster
+    cluster_lagcorrs[0, cluster-1, :] = first_lagcorr[mask][0]
+    cluster_lagcorrs[1, cluster-1, :] = lasts_lagcorr[mask][0]
+np.save(output_fpath + 'lagcorrs.npy', cluster_lagcorrs)
+
 # Run lag correlation bootstraps
-n_resamp = 100
+n_resamp = 1000
 for resamp in range(n_resamp):
     resamp_subjs = [random.choice(subjects) for s in range(len(subjects))]
-    dset.load_rois('../outputs/rois/', resamp_subjs)
+    dset.load_rois(output_fpath + 'rois/', resamp_subjs)
     bootpath = output_fpath + 'boot/lagcorr_boot' + str(resamp)
     lag_corr(dset, rois, ev_conv, max_lag, header_fpath, bootpath)
 bootstrap_stats(output_fpath + 'boot/lagcorr_boot*first.nii',
                 output_fpath + 'lagcorr_first_p.nii', use_z = False)
 bootstrap_stats(output_fpath + 'boot/lagcorr_boot*lasts.nii',
-                output_fpath + 'lagcorr_last_p.nii', use_z = False)
+                output_fpath + 'lagcorr_lasts_p.nii', use_z = False)
 bootstrap_stats(output_fpath + 'boot/lagcorr_boot*diff.nii',
                 output_fpath + 'lagcorr_diff_p.nii', use_z = False)
