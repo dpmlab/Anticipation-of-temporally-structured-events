@@ -134,11 +134,12 @@ def save_rois(fpath, subjects, condition_regex, roi_mask, savepath):
             fname = glob.glob(fpath + subj + '/' +
                               condition_regex + str(rep + 1) + '.nii')
 
-            rep_z = nib.load(fname[0]).get_fdata()[roi_mask.T]
-            nnan = ~np.all(rep_z == 0, axis=1)
-            rep_mean = np.mean(rep_z[nnan], axis=1, keepdims=True)
-            rep_std = np.std(rep_z[nnan], axis=1, keepdims=True)
-            rep_z[nnan] = (rep_z[nnan] - rep_mean)/rep_std
+            rep_z = nib.load(fname[0]).get_fdata().T
+            rep_z = rep_z[:,roi_mask]
+            nnan = ~np.all(rep_z == 0, axis=0)
+            rep_mean = np.mean(rep_z[:,nnan], axis=0, keepdims=True)
+            rep_std = np.std(rep_z[:,nnan], axis=0, keepdims=True)
+            rep_z[:,nnan] = (rep_z[:,nnan] - rep_mean)/rep_std
 
-            roi_data[rep][:,nnan] = rep_z[nnan].T
+            roi_data[rep][:,nnan] = rep_z[:,nnan]
         np.save(savepath + subj.split('/')[-1], roi_data)
