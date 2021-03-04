@@ -22,6 +22,26 @@ def hyperalign(subj_list, nFeatures=15):
     shared = [zscore(d.reshape(d.shape[0], 60, 6), axis=1, ddof=1).T for d in shared]
     return shared
 
+def heldout_ll(data, n_events, split):
+    # Data is subj x TR x Voxels
+    # split is T/F to define split groups
+    nSubj = data.shape[0]
+    d = deepcopy(data)
+
+    # Remove nan vox
+    nan_idxs = np.where(np.isnan(d))
+    nan_idxs = list(set(nan_idxs[2]))
+    d = np.delete(np.asarray(d), nan_idxs, axis=2)
+
+    group1 = d[split].mean(0)
+    group2 = d[~split].mean(0)
+    es = EventSegment(n_events).fit(group1)
+    _, ll12 = es.find_events(group2)
+    es = EventSegment(n_events).fit(group2)
+    _, ll21 = es.find_events(group1)
+
+    return (ll12 + ll21)/2
+
 def tj_fit(data, n_events=7, avg_lasts=True):
 
     """Jointly fits HMM to multiple trials (repetitions).
