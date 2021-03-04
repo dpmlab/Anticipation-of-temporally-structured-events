@@ -2,9 +2,25 @@ import glob
 from copy import deepcopy
 import numpy as np
 import nibabel as nib
-from scipy.stats import pearsonr, norm
+from scipy.stats import pearsonr, norm, zscore
 from brainiak.eventseg.event import EventSegment
+from brainiak.funcalign.srm import DetSRM
 
+def hyperalign(subj_list, nFeatures=15):
+    # subj_list is list of 6 Reps x 60 TRs x Vox matrices
+    # returns list of 6 x 60 x nFeatures
+
+    # Remove voxels == 0
+    subj_list = [d[:,:,np.all(~np.all(d == 0, axis=1), axis=0)] for d in subj_list]
+    # Remove any subjects whose # voxels drop below nFeatures
+    subj_list = [d for d in subj_list if d.shape[2] >= nFeatures]
+
+    subj_list = [d.T.reshape(d.shape[-1], 60*6) for d in subj_list]
+    srm = DetSRM(features=nFeatures)
+    srm.fit(subj_list)
+    shared = srm.transform(subj_list)
+    shared = [zscore(d.reshape(d.shape[0], 60, 6), axis=1, ddof=1).T for d in shared]
+    return shared
 
 def tj_fit(data, n_events=7, avg_lasts=True):
 

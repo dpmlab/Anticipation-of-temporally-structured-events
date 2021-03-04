@@ -1,7 +1,9 @@
 import glob
 import numpy as np
 import nibabel as nib
-
+import tables
+import pickle
+from s_light import get_s_lights
 
 class Dataset:
 
@@ -143,3 +145,44 @@ def save_rois(fpath, subjects, condition_regex, roi_mask, savepath):
 
             roi_data[rep][:,nnan] = rep_z[:,nnan]
         np.save(savepath + subj.split('/')[-1], roi_data)
+
+def save_s_lights(fpath, non_nan_mask, savepath):
+
+    subjects = glob.glob(fpath + '*pred*')
+
+    print("Finding searchlights")
+    coords = np.transpose(np.where(non_nan_mask))
+    SL_allvox = get_s_lights(coords)
+    print("Found " + str(len(SL_allvox)) + " searchlights")
+    with open(savepath + 'SL_allvox.p', 'wb') as fp:
+        pickle.dump(SL_allvox, fp)
+
+    print("Creating searchlight data")
+    
+    for subj in subjects:
+        subjname = 'subj_' + subj.split('/')[-1]
+        print("   " + subjname)
+        for cond in ['Intact', 'SFix', 'SRnd']:
+            print("      " + cond)
+            all_rep = []
+            for rep in range(6):
+                fname = glob.glob(fpath + subj + '/filt*' +
+                                  cond + '*' + str(rep + 1) + '.nii')
+                rep_z = nib.load(fname[0]).get_fdata().T
+                rep_z = rep_z[:, non_nan_mask]
+                nnan = ~np.all(rep_z == 0, axis=0)
+                rep_mean = np.mean(rep_z[:,nnan], axis=0, keepdims=True)
+                rep_std = np.std(rep_z[:,nnan], axis=0, keepdims=True)
+                rep_z[:,nnan] = (rep_z[:,nnan] - rep_mean)/rep_std
+                all_rep.append(rep_z)
+
+            for sl_i in range(len(SL_allvox)):
+                sl_data = np.zeros((6, 60, len(SL_allvox[sl_i])))
+                for rep in range(6):
+                    sl_data[rep,:,:] = all_rep[rep][:,SL_allvox[sl_i]]
+                h5file = tables.open_file(savepath + str(sl_i) + '.h5', mode='a')
+                
+                if '/' + subjname not in h5file:
+                    h5file.create_group('/', subjname)
+                h5file.create_array('/' + subjname, cond, sl_data)
+                h5file.close()
