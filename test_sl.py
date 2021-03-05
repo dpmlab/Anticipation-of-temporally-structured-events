@@ -23,8 +23,8 @@ elif analysis_type == 1:
 	           '../data/SL/', subjects, non_nan, header_fpath, output_fpath + 'AUC_S15.nii')
 elif analysis_type == 2:
 	# SRM10
-	s_light(True, False, 15, False,
-	           '../data/SL/', subjects, non_nan, header_fpath, output_fpath + 'AUC_S15.nii')
+	s_light(True, False, 10, False,
+	           '../data/SL/', subjects, non_nan, header_fpath, output_fpath + 'AUC_S10.nii')
 elif analysis_type == 3:
 	# Joint fit 6
 	s_light(False, False, 0, False,

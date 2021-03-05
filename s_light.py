@@ -23,7 +23,7 @@ def get_s_lights(coords, stride=5, radius=5, min_vox=20):
 
 
 def s_light(avg_lasts, tune_K, SRM_features, use_SFix,
-            sl_path, subjects, non_nan_mask, header_fpath, savename):
+            sl_path, subj_perms, non_nan_mask, header_fpath, savename):
     """Fits HMM to searchlights jointly to first and averaged last viewings.
 
     Executes searchlight analysis on voxel x voxel x voxel data, for all
@@ -60,16 +60,17 @@ def s_light(avg_lasts, tune_K, SRM_features, use_SFix,
         for i in tqdm(range(nSL)):
             sl_h5 = tables.open_file(sl_path + str(i) + '.h5', mode='r')
             subj_list = []
-            for subj in subjects:
+            for subj in subj_perms:
                 subjname = '/subj_' + subj.split('/')[-1]
                 d = sl_h5.get_node(subjname, 'Intact').read()
+                d = d[subj_perms[subj]]
                 subj_list.append(d)
             sl_h5.close()
 
             if tune_K:
                 K_range = np.arange(2, 10)
                 ll = np.zeros(len(K_range))
-                split = np.array([('predtrw01' in s) for s in subjects])
+                split = np.array([('predtrw01' in s) for s in subj_perms])
                 rep1 = np.array([d[0] for d in subj_list])
                 for i, K in enumerate(K_range):
                     ll[i] = heldout_ll(rep1, K, split)
@@ -95,6 +96,9 @@ def s_light(avg_lasts, tune_K, SRM_features, use_SFix,
                 save_nii(savename, header_fpath, vox_AUCdiffs)
             else:
                 save_nii(savename + '_' + str(i) + '.nii', header_fpath, vox_AUCdiffs)
+                if i == 1:
+                    mean_AUCdiff = vox3d[:,:,:,1:].mean(3) - vox3d[:,:,:,0]
+                    save_nii(savename + '_mean.nii', header_fpath, mean_AUCdiff)
 
         if tune_K:
             vox3d = get_vox_map(sl_K, SL_allvox, non_nan_mask)
@@ -109,7 +113,7 @@ def s_light(avg_lasts, tune_K, SRM_features, use_SFix,
                 sl_h5 = tables.open_file(sl_path + str(i) + '.h5', mode='r')
                 Intact_subj_list = []
                 SFix_subj_list = []
-                for subj in [s for s in subjects if group in s]:
+                for subj in [s for s in subj_perms if group in s]:
                     subjname = '/subj_' + subj.split('/')[-1]
                     dI = sl_h5.get_node(subjname, 'Intact').read()
                     Intact_subj_list.append(dI)
