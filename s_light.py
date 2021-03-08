@@ -21,6 +21,102 @@ def get_s_lights(coords, stride=5, radius=5, min_vox=20):
 
     return SL_allvox
 
+def one_sl(sl, subj_perms, avg_lasts, tune_K, SRM_features):
+    sl_h5 = tables.open_file(sl, mode='r')
+    subj_list = []
+    for subj in subj_perms:
+        subjname = '/subj_' + subj.split('/')[-1]
+        d = sl_h5.get_node(subjname, 'Intact').read()
+        d = d[subj_perms[subj]]
+        subj_list.append(d)
+    sl_h5.close()
+
+    if tune_K:
+        K_range = np.arange(2, 10)
+        ll = np.zeros(len(K_range))
+        split = np.array([('predtrw01' in s) for s in subj_perms])
+        rep1 = np.array([d[0] for d in subj_list])
+        for i, K in enumerate(K_range):
+            ll[i] = heldout_ll(rep1, K, split)
+        n_events = K_range[np.argmax(ll)]
+    else:
+        n_events = 7
+
+    if SRM_features == 0:
+        group_data = np.mean(subj_list, axis=0)
+    else:
+        hyp_data = hyperalign(subj_list, nFeatures=SRM_features)
+        group_data = np.mean(hyp_data, axis=0)
+
+    seg = tj_fit(group_data, n_events=n_events, avg_lasts=avg_lasts)
+    
+    return (get_AUCs(seg), n_events)
+
+def one_sl_SF(sl, subj_perms, avg_lasts):
+    AUC_diff_Intact = []
+    AUC_diff_SFix = []
+    for group in ['predtrw01', 'predtrw02']:
+        sl_h5 = tables.open_file(sl, mode='r')
+        Intact_subj_list = []
+        SFix_subj_list = []
+        for subj in [s for s in subj_perms if group in s]:
+            subjname = '/subj_' + subj.split('/')[-1]
+            dI = sl_h5.get_node(subjname, 'Intact').read()
+            dI = dI[subj_perms[subj]]
+            Intact_subj_list.append(dI)
+            dS = sl_h5.get_node(subjname, 'SFix').read()
+            dS = dS[subj_perms[subj]]
+            SFix_subj_list.append(dS)
+        sl_h5.close()
+
+        group_Intact = np.mean(Intact_subj_list, axis=0)
+        group_SFix = np.mean(SFix_subj_list, axis=0)
+
+        AUC_Intact = get_AUCs(tj_fit(group_Intact, avg_lasts=avg_lasts))
+        AUC_SFix = get_AUCs(tj_fit(group_SFix, avg_lasts=avg_lasts))
+
+        AUC_diff_Intact.append(AUC_Intact - AUC_Intact[0])
+        AUC_diff_SFix.append(AUC_SFix - AUC_SFix[0])
+
+    return (np.mean(AUC_diff_Intact, axis=0),
+            np.mean(AUC_diff_SFix, axis=0))
+
+def load_pickle(analysis_type, perm_i, pickle_path):
+    nSL = 5354
+    sl_AUCs = nSL*[None]
+    sl_K = nSL*[None]
+    sl_AUCdiffs_Intact = nSL*[None]
+    sl_AUCdiffs_SFix = nSL*[None]
+
+    pickles = glob.glob(pickle_path + '*.p')
+    for i, pick in enumerate(pickles):
+        pick_parts = pick.split('_')
+        analysis_i = int(pick_parts[1])
+        sl_i = int(pick_parts[2])
+        perm_start = int(pick_parts[3])
+        perm_end = int(pick_parts[4])
+
+        if analysis_i == analysis_type and perm_i >= perm_start and perm_i < perm_end:
+            with open (pick, 'rb') as fp:
+                pick_data = pickle.load(fp)
+            perm_data = pick_data[perm_i - perm_start]
+            if analysis_type == 4:
+                sl_AUCdiffs_Intact[sl_i] = perm_data[0]
+                sl_AUCdiffs_SFix[sl_i] = perm_data[1]
+            else:
+                sl_AUCs[sl_i] = perm_data[0]
+                if analysis_type == 3:
+                    sl_K[sl_i] = perm_data[1]
+
+    AUC_Nones = np.sum([i is None for i in sl_AUCs])
+    AUC_SFix_Nones = np.sum([i is None for i in sl_AUCdiffs_SFix])
+    if analysis_type == 4:
+        if AUC_SFix_Nones > 0:
+            print('Missing', AUC_SFix_Nones, 'searchlights')
+    else:
+        if AUC_Nones > 0:
+            print('Missing', AUC_Nones, 'searchlights')
+    return (sl_AUCs, sl_K, sl_AUCdiffs_Intact, sl_AUCdiffs_SFix)
 
 def s_light(avg_lasts, tune_K, SRM_features, use_SFix,
             sl_path, subj_perms, non_nan_mask, header_fpath, savename):
@@ -58,36 +154,10 @@ def s_light(avg_lasts, tune_K, SRM_features, use_SFix,
         sl_AUCs = []
         sl_K = []
         for i in tqdm(range(nSL)):
-            sl_h5 = tables.open_file(sl_path + str(i) + '.h5', mode='r')
-            subj_list = []
-            for subj in subj_perms:
-                subjname = '/subj_' + subj.split('/')[-1]
-                d = sl_h5.get_node(subjname, 'Intact').read()
-                d = d[subj_perms[subj]]
-                subj_list.append(d)
-            sl_h5.close()
-
+            sl_res = one_sl(sl_path + str(i) + '.h5', subj_perms, avg_lasts, tune_K, SRM_features)
+            sl_AUCs.append(sl_res[0])
             if tune_K:
-                K_range = np.arange(2, 10)
-                ll = np.zeros(len(K_range))
-                split = np.array([('predtrw01' in s) for s in subj_perms])
-                rep1 = np.array([d[0] for d in subj_list])
-                for i, K in enumerate(K_range):
-                    ll[i] = heldout_ll(rep1, K, split)
-                n_events = K_range[np.argmax(ll)]
-                sl_K.append([n_events])
-            else:
-                n_events = 7
-
-            if SRM_features == 0:
-                group_data = np.mean(subj_list, axis=0)
-            else:
-                hyp_data = hyperalign(subj_list, nFeatures=SRM_features)
-                group_data = np.mean(hyp_data, axis=0)
-
-            seg = tj_fit(group_data, n_events=n_events, avg_lasts=avg_lasts)
-            
-            sl_AUCs.append(get_AUCs(seg))
+                sl_K.append([sl_res[1]])
 
         vox3d = get_vox_map(sl_AUCs, SL_allvox, non_nan_mask)
         for i in range(1, vox3d.shape[3]):
@@ -107,31 +177,10 @@ def s_light(avg_lasts, tune_K, SRM_features, use_SFix,
         sl_AUCdiffs_Intact = []
         sl_AUCdiffs_SFix = []
         for i in tqdm(range(nSL)):
-            AUC_diff_Intact = []
-            AUC_diff_SFix = []
-            for group in ['predtrw01', 'predtrw02']:
-                sl_h5 = tables.open_file(sl_path + str(i) + '.h5', mode='r')
-                Intact_subj_list = []
-                SFix_subj_list = []
-                for subj in [s for s in subj_perms if group in s]:
-                    subjname = '/subj_' + subj.split('/')[-1]
-                    dI = sl_h5.get_node(subjname, 'Intact').read()
-                    Intact_subj_list.append(dI)
-                    dS = sl_h5.get_node(subjname, 'SFix').read()
-                    SFix_subj_list.append(dS)
-                sl_h5.close()
+            AUC_diff = one_sl_SF(sl_path + str(i) + '.h5', subj_perms, avg_lasts)
+            sl_AUCdiffs_Intact.append(AUC_diff[0])
+            sl_AUCdiffs_SFix.append(AUC_diff[1])
 
-                group_Intact = np.mean(Intact_subj_list, axis=0)
-                group_SFix = np.mean(SFix_subj_list, axis=0)
-
-                AUC_Intact = get_AUCs(tj_fit(group_Intact, avg_lasts=avg_lasts))
-                AUC_SFix = get_AUCs(tj_fit(group_SFix, avg_lasts=avg_lasts))
-
-                AUC_diff_Intact.append(AUC_Intact - AUC_Intact[0])
-                AUC_diff_SFix.append(AUC_SFix - AUC_SFix[0])
-                
-            sl_AUCdiffs_Intact.append(np.mean(AUC_diff_Intact, axis=0))
-            sl_AUCdiffs_SFix.append(np.mean(AUC_diff_SFix, axis=0))
 
         vox3d_Intact = get_vox_map(sl_AUCdiffs_Intact, SL_allvox, non_nan_mask)
         vox3d_SFix = get_vox_map(sl_AUCdiffs_SFix, SL_allvox, non_nan_mask)
