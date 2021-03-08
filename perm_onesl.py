@@ -9,7 +9,7 @@ from s_light import one_sl, one_sl_SF
 
 data_fpath = '../data/'
 output_fpath = '../outputs/perm/'
-subjects = glob.glob(data_fpath + '*pred*')
+subjects = ['../data/0814151_predtrw01', '../data/0425161_predtrw02', '../data/0904151_predtrw01', '../data/0707151_predtrw01', '../data/0421161_predtrw02', '../data/0706151_predtrw01', '../data/0902151_predtrw01', '../data/0408161_predtrw02', '../data/0724151_predtrw01', '../data/0510161_predtrw02', '../data/0511161_predtrw02', '../data/0407161_predtrw02', '../data/0504161_predtrw02', '../data/0731151_predtrw01', '../data/0622151_predtrw01', '../data/0826151_predtrw01', '../data/0827151_predtrw01', '../data/0503161_predtrw02', '../data/0624151_predtrw01', '../data/0411161_predtrw02', '../data/0502161_predtrw02', '../data/0413161_predtrw02', '../data/0821151_predtrw01', '../data/0626151_predtrw01', '../data/0803152_predtrw01', '../data/0419161_predtrw02', '../data/0418161_predtrw02', '../data/0509162_predtrw02', '../data/0509161_predtrw02', '../data/0803151_predtrw01']
 header_fpath = data_fpath + 'header.nii'
 
 analysis_type = int(sys.argv[1])
