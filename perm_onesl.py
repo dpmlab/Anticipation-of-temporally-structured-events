@@ -6,6 +6,7 @@ from tqdm import tqdm
 import pickle
 import time
 import tables
+import numpy as np
 from numpy.random import default_rng
 from s_light import one_sl, one_sl_SF
 
@@ -24,23 +25,23 @@ print('Loading data...')
 load_start = time.time()
 sl_h5 = tables.open_file('../data/SL/' + str(sl_i) + '.h5', mode='r')
 
-subj_list = []
+subj_list_orig = []
 for subj in subjects:
     subjname = '/subj_' + subj.split('/')[-1]
     d = sl_h5.get_node(subjname, 'Intact').read()
-    subj_list.append(d)
+    subj_list_orig.append(d)
 
-Intact_subj_list = dict()
-SFix_subj_list = dict()
+Intact_subj_list_orig = dict()
+SFix_subj_list_orig = dict()
 for group in ['predtrw01', 'predtrw02']:
-    Intact_subj_list[group] = []
-    SFix_subj_list[group] = []
+    Intact_subj_list_orig[group] = []
+    SFix_subj_list_orig[group] = []
     for subj in [s for s in subjects if group in s]:
         subjname = '/subj_' + subj.split('/')[-1]
         dI = sl_h5.get_node(subjname, 'Intact').read()
-        Intact_subj_list[group].append(dI)
+        Intact_subj_list_orig[group].append(dI)
         dS = sl_h5.get_node(subjname, 'SFix').read()
-        SFix_subj_list[group].append(dS)
+        SFix_subj_list_orig[group].append(dS)
 
 sl_h5.close()
 print('  Loaded in', time.time() - load_start, 'seconds')
@@ -56,20 +57,30 @@ for analysis_type in range(5):
             sl_K = []
 
     for i in tqdm(range(perm_start, perm_end)):
-        if i > 0:  # Don't permute perm=0
-            if analysis_type == 4:
-                group_Intact = []
-                group_SFix = []
-                for group in ['predtrw01', 'predtrw02']:
-                    for s in range(len(Intact_subj_list[group])):
+        
+        if analysis_type == 4:
+            group_Intact = []
+            group_SFix = []
+            for group in ['predtrw01', 'predtrw02']:
+                Intact_subj_list = []
+                SFix_subj_list = []
+                for s in range(len(Intact_subj_list_orig[group])):
+                    if i == 0:  # Don't permute perm=0
+                        subj_perm = np.arange(6)
+                    else:
                         subj_perm = rng.permutation(6)
-                        Intact_subj_list[group][s] = Intact_subj_list[group][s][subj_perm]
-                        SFix_subj_list[group][s] = SFix_subj_list[group][s][subj_perm]
-                    group_Intact.append(np.mean(Intact_subj_list[group], axis=0))
-                    group_SFix.append(np.mean(SFix_subj_list[group], axis=0))
-            else:
-                for s in range(len(subj_list)):
-                    subj_list[s] = subj_list[s][rng.permutation(6)]
+                    Intact_subj_list.append(Intact_subj_list_orig[group][s][subj_perm])
+                    SFix_subj_list.append(Intact_subj_list_orig[group][s][subj_perm])
+                group_Intact.append(np.mean(Intact_subj_list, axis=0))
+                group_SFix.append(np.mean(SFix_subj_list, axis=0))
+        else:
+            subj_list = []
+            for s in range(len(subj_list_orig)):
+                if i == 0:  # Don't permute perm=0
+                    subj_perm = np.arange(6)
+                else:
+                    subj_perm = rng.permutation(6)
+                subj_list.append(subj_list_orig[s][subj_perm])
 
         if analysis_type == 0:
             # Traditional
