@@ -7,6 +7,7 @@ import pickle
 import time
 import tables
 import numpy as np
+from os import path
 from numpy.random import default_rng
 from s_light import one_sl, one_sl_SF
 
@@ -47,6 +48,11 @@ sl_h5.close()
 print('  Loaded in', time.time() - load_start, 'seconds')
 
 for analysis_type in range(5):
+    savename = output_fpath + '/pickles/_' + str(analysis_type) + '_' + str(sl_i) + '_' + str(perm_start) + '_' + str(perm_end) +'_.p'
+    if path.exists(savename):
+        print('Analysis', analysis_type, 'already exists, skipping')
+        continue
+
     print('Analysis', analysis_type)
     if analysis_type == 4:
         sl_AUCdiffs_Intact = []
@@ -102,7 +108,7 @@ for analysis_type in range(5):
             sl_AUCdiffs_Intact.append(sl_res[0])
             sl_AUCdiffs_SFix.append(sl_res[1])
 
-    with open(output_fpath + '/pickles/_' + str(analysis_type) + '_' + str(sl_i) + '_' + str(perm_start) + '_' + str(perm_end) +'_.p', 'wb') as fp:
+    with open(savename, 'wb') as fp:
         if analysis_type == 4:
             pickle.dump((sl_AUCdiffs_Intact, sl_AUCdiffs_SFix), fp)
         elif analysis_type == 3:
