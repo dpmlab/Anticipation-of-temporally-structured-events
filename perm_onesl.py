@@ -70,7 +70,7 @@ for analysis_type in range(5):
                     else:
                         subj_perm = rng.permutation(6)
                     Intact_subj_list.append(Intact_subj_list_orig[group][s][subj_perm])
-                    SFix_subj_list.append(Intact_subj_list_orig[group][s][subj_perm])
+                    SFix_subj_list.append(SFix_subj_list_orig[group][s][subj_perm])
                 group_Intact.append(np.mean(Intact_subj_list, axis=0))
                 group_SFix.append(np.mean(SFix_subj_list, axis=0))
         else:

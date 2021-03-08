@@ -78,10 +78,11 @@ def load_pickle(analysis_type, perm_i, pickle_path):
             if analysis_type == 4:
                 sl_AUCdiffs_Intact[sl_i] = perm_data[0]
                 sl_AUCdiffs_SFix[sl_i] = perm_data[1]
-            else:
+            elif analysis_type == 3:
                 sl_AUCs[sl_i] = perm_data[0]
-                if analysis_type == 3:
-                    sl_K[sl_i] = perm_data[1]
+                sl_K[sl_i] = perm_data[1]
+            else:
+                sl_AUCs[sl_i] = perm_data
 
     AUC_Nones = np.sum([i is None for i in sl_AUCs])
     AUC_SFix_Nones = np.sum([i is None for i in sl_AUCdiffs_SFix])
@@ -93,54 +94,27 @@ def load_pickle(analysis_type, perm_i, pickle_path):
             print('Missing', AUC_Nones, 'searchlights')
     return (sl_AUCs, sl_K, sl_AUCdiffs_Intact, sl_AUCdiffs_SFix)
 
-def s_light(avg_lasts, tune_K, SRM_features, use_SFix,
-            sl_path, subj_perms, non_nan_mask, header_fpath, savename):
-    """Fits HMM to searchlights jointly to first and averaged last viewings.
-
-    Executes searchlight analysis on voxel x voxel x voxel data, for all
-    non_nan voxels. Stride and radius are used to adjust searchlight size and
-    movement, and only searchlights with a number of valid voxels above a
-    minimum size are run.
-
-    Parameters
-    ----------
-    dataset : Dataset
-        Data and mask for searchlight analysis
-    stride : int, optional
-        Specifies amount by which searchlights move across data
-    radius : int, optional
-        Specifies radius of each searchlight
-    min_vox : int, optional
-        Indicates the minimum number of elements with data for each searchlight
-
-    Returns
-    -------
-    SL_results : list
-        Results of HMM fits on searchlights
-    SL_allvox : list
-        Voxels in each searchlight
-    """
+def compile_s_light(analysis_type, non_nan_mask, sl_path, header_fpath, pickle_path, savename):
 
     nSL = len(glob.glob(sl_path + '*.h5'))
     with open (sl_path + 'SL_allvox.p', 'rb') as fp:
         SL_allvox = pickle.load(fp)
 
+    sl_AUCs = load_pickle(0, 0, pickle_path)[0]
+    for i in range(len(sl_AUCs)):
+        if sl_AUCs[i] is None:
+            sl_AUCs[i] = [0, 0]
+    vox3d = get_vox_map(sl_AUCs, SL_allvox, non_nan_mask)
+    for i in range(1, vox3d.shape[3]):
+        vox_AUCdiffs = vox3d[:,:,:,i] - vox3d[:,:,:,0]
+        if vox3d.shape[3] == 2:
+            save_nii(savename, header_fpath, vox_AUCdiffs)
+
+    return
+
     if not use_SFix:
-        sl_AUCs = []
-        sl_K = []
-        for i in tqdm(range(nSL)):
-            sl_h5 = tables.open_file(sl_path + str(i) + '.h5', mode='r')
-            subj_list = []
-            for subj in subj_perms:
-                subjname = '/subj_' + subj.split('/')[-1]
-                d = sl_h5.get_node(subjname, 'Intact').read()
-                d = d[subj_perms[subj]]
-                subj_list.append(d)
-            sl_h5.close()
-            sl_res = one_sl(subj_list, subj_perms, avg_lasts, tune_K, SRM_features)
-            sl_AUCs.append(sl_res[0])
-            if tune_K:
-                sl_K.append([sl_res[1]])
+        for perm_i in range(100):
+            all_sl = load_pickle(analysis_type, perm_i, pickle_path)
 
         vox3d = get_vox_map(sl_AUCs, SL_allvox, non_nan_mask)
         for i in range(1, vox3d.shape[3]):
