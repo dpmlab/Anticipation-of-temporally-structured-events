@@ -6,7 +6,8 @@ import tables
 import glob
 import pickle
 from tqdm import tqdm
-from utils import get_AUCs, tj_fit, save_nii, hyperalign, heldout_ll
+from utils import get_AUCs, tj_fit, save_nii, hyperalign, heldout_ll, FDR_p
+from scipy.stats import norm
 
 def get_s_lights(coords, stride=5, radius=5, min_vox=20):
     SL_allvox = []
@@ -56,102 +57,84 @@ def one_sl_SF(group_Intact, group_SFix, avg_lasts):
     return (np.mean(AUC_diff_Intact, axis=0),
             np.mean(AUC_diff_SFix, axis=0))
 
-def load_pickle(analysis_type, perm_i, pickle_path):
+def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpath, savename):
     nSL = 5354
-    sl_AUCs = nSL*[None]
+    nPerm = 100
+    TR = 1.5
+    nEvents = 7
+
+    sl_AUCdiffs = nSL*[None]
     sl_K = nSL*[None]
     sl_AUCdiffs_Intact = nSL*[None]
     sl_AUCdiffs_SFix = nSL*[None]
+    for sl_i in range(nSL):
+        if analysis_type == 0 or analysis_type == 1 or analysis_type == 3:
+            sl_AUCdiffs[sl_i] = np.zeros(nPerm)
+        elif analysis_type == 2:
+            sl_AUCdiffs[sl_i] = np.zeros((5, nPerm))
+
+        if analysis_type == 3:
+            sl_K[sl_i] = np.zeros(nPerm)
+
+        if analysis_type == 4:
+            sl_AUCdiffs_Intact[sl_i] = np.zeros(nPerm)
+            sl_AUCdiffs_SFix[sl_i] = np.zeros(nPerm)
 
     pickles = glob.glob(pickle_path + '*.p')
     for i, pick in enumerate(pickles):
         pick_parts = pick.split('_')
         analysis_i = int(pick_parts[1])
         sl_i = int(pick_parts[2])
-        perm_start = int(pick_parts[3])
-        perm_end = int(pick_parts[4])
 
-        if analysis_i == analysis_type and perm_i >= perm_start and perm_i < perm_end:
+        if analysis_i == analysis_type:
             with open (pick, 'rb') as fp:
                 pick_data = pickle.load(fp)
-            perm_data = pick_data[perm_i - perm_start]
-            if analysis_type == 4:
-                sl_AUCdiffs_Intact[sl_i] = perm_data[0]
-                sl_AUCdiffs_SFix[sl_i] = perm_data[1]
-            elif analysis_type == 3:
-                sl_AUCs[sl_i] = perm_data[0]
-                sl_K[sl_i] = perm_data[1]
-            else:
-                sl_AUCs[sl_i] = perm_data
+            for perm_i in range(100):
+                if analysis_type == 0 or analysis_type == 1:
+                    sl_AUCdiffs[sl_i][perm_i] = TR/(nEvents-1) * (pick_data[perm_i][1]-pick_data[perm_i][0])
+                elif analysis_type == 2:
+                    sl_AUCdiffs[sl_i][:,perm_i] = TR/(nEvents-1) * (pick_data[perm_i][1:]-pick_data[perm_i][0])
+                elif analysis_type == 3:
+                    K = pick_data[1][perm_i]
+                    sl_K[sl_i][perm_i] = K
+                    sl_AUCdiffs[sl_i][perm_i] = TR/(K-1) * pick_data[0][perm_i][1:]-pick_data[0][perm_i][0]
+                elif analysis_type == 4:
+                    sl_AUCdiffs_Intact[sl_i][perm_i] = TR/(nEvents-1) * pick_data[0][perm_i][1]
+                    sl_AUCdiffs_SFix[sl_i][perm_i] = TR/(nEvents-1) * pick_data[1][perm_i][1]
 
-    AUC_Nones = np.sum([i is None for i in sl_AUCs])
-    AUC_SFix_Nones = np.sum([i is None for i in sl_AUCdiffs_SFix])
+
+    if analysis_type == 0 or analysis_type == 1 or analysis_type == 3:
+        vox3d, qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
+        save_nii(savename, header_fpath, vox3d)
+        save_nii(savename[:-4] + '_q.nii', header_fpath, qvals)
+
+    if analysis_type == 2:
+        vox3d, qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
+        for i in range(vox3d.shape[3]):
+            save_nii(savename + '_' + str(i) + '.nii', header_fpath, vox3d[:,:,:,i])
+            save_nii(savename + '_' + str(i) + '_q.nii', header_fpath, qvals[:,:,:,i])
+
+        for sl_i in range(nSL):
+            sl_AUCdiffs[sl_i] = sl_AUCdiffs[sl_i].mean(0)
+        vox3d, qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
+        save_nii(savename + '_mean.nii', header_fpath, vox3d)
+        save_nii(savename + '_mean_q.nii', header_fpath, qvals)
+                    
+    if analysis_type == 3:
+        vox3d = get_vox_map(sl_K, SL_allvox, non_nan_mask)[0]
+        save_nii(savename[:-4] + '_K.nii', header_fpath, vox3d)
+
     if analysis_type == 4:
-        if AUC_SFix_Nones > 0:
-            print('Missing', AUC_SFix_Nones, 'searchlights')
-    else:
-        if AUC_Nones > 0:
-            print('Missing', AUC_Nones, 'searchlights')
-    return (sl_AUCs, sl_K, sl_AUCdiffs_Intact, sl_AUCdiffs_SFix)
-
-def compile_s_light(analysis_type, non_nan_mask, sl_path, header_fpath, pickle_path, savename):
-
-    nSL = len(glob.glob(sl_path + '*.h5'))
-    with open (sl_path + 'SL_allvox.p', 'rb') as fp:
-        SL_allvox = pickle.load(fp)
-
-    sl_AUCs = load_pickle(0, 0, pickle_path)[0]
-    for i in range(len(sl_AUCs)):
-        if sl_AUCs[i] is None:
-            sl_AUCs[i] = [0, 0]
-    vox3d = get_vox_map(sl_AUCs, SL_allvox, non_nan_mask)
-    for i in range(1, vox3d.shape[3]):
-        vox_AUCdiffs = vox3d[:,:,:,i] - vox3d[:,:,:,0]
-        if vox3d.shape[3] == 2:
-            save_nii(savename, header_fpath, vox_AUCdiffs)
-
-    return
-
-    if not use_SFix:
-        for perm_i in range(100):
-            all_sl = load_pickle(analysis_type, perm_i, pickle_path)
-
-        vox3d = get_vox_map(sl_AUCs, SL_allvox, non_nan_mask)
-        for i in range(1, vox3d.shape[3]):
-            vox_AUCdiffs = vox3d[:,:,:,i] - vox3d[:,:,:,0]
-            if vox3d.shape[3] == 2:
-                save_nii(savename, header_fpath, vox_AUCdiffs)
-            else:
-                save_nii(savename + '_' + str(i) + '.nii', header_fpath, vox_AUCdiffs)
-                if i == 1:
-                    mean_AUCdiff = vox3d[:,:,:,1:].mean(3) - vox3d[:,:,:,0]
-                    save_nii(savename + '_mean.nii', header_fpath, mean_AUCdiff)
-
-        if tune_K:
-            vox3d = get_vox_map(sl_K, SL_allvox, non_nan_mask)
-            save_nii(savename[:-4] + '_K.nii', header_fpath, vox3d[:,:,:,0])
-    else:
-        sl_AUCdiffs_Intact = []
-        sl_AUCdiffs_SFix = []
-        for i in tqdm(range(nSL)):
-            AUC_diff = one_sl_SF(sl_path + str(i) + '.h5', subj_perms, avg_lasts)
-            sl_AUCdiffs_Intact.append(AUC_diff[0])
-            sl_AUCdiffs_SFix.append(AUC_diff[1])
-
-
-        vox3d_Intact = get_vox_map(sl_AUCdiffs_Intact, SL_allvox, non_nan_mask)
-        vox3d_SFix = get_vox_map(sl_AUCdiffs_SFix, SL_allvox, non_nan_mask)
-        for i in range(1, vox3d_Intact.shape[3]):
-            if vox3d_Intact.shape[3] == 2:
-                save_nii(savename + '_Intact.nii', header_fpath, vox3d_Intact[:,:,:,i])
-                save_nii(savename + '_SFix.nii', header_fpath, vox3d_SFix[:,:,:,i])
-            else:
-                save_nii(savename + '_Intact_' + str(i) + '.nii', header_fpath, vox3d_Intact[:,:,:,i])
-                save_nii(savename + '_SFix_' + str(i) + '.nii', header_fpath, vox3d_SFix[:,:,:,i])
+        vox3d_I, qvals_I = get_vox_map(sl_AUCdiffs_Intact, SL_allvox, non_nan_mask)
+        vox3d_SF, qvals_SF = get_vox_map(sl_AUCdiffs_SFix, SL_allvox, non_nan_mask)
+        save_nii(savename + '_Intact.nii', header_fpath, vox3d_I)
+        save_nii(savename + '_Intact_q.nii', header_fpath, qvals_I)
+        save_nii(savename + '_SFix.nii', header_fpath, vox3d_SF)
+        save_nii(savename + '_SFix_q.nii', header_fpath, qvals_SF)
 
 
 def get_vox_map(SL_results, SL_voxels, non_nan_mask):
-
+    # SL_results is list of sl results, each length perm or size maps x perm
     """Projects searchlight results to voxel maps.
 
     Parameters
@@ -175,23 +158,41 @@ def get_vox_map(SL_results, SL_voxels, non_nan_mask):
     """
 
     coords = np.transpose(np.where(non_nan_mask))
-    nMaps = len(SL_results[0])
     nVox = coords.shape[0]
+    if SL_results[0].ndim == 1:
+        nMaps = 1
+        nPerm = len(SL_results[0])
+    else:
+        nMaps = SL_results[0].shape[0]
+        nPerm = SL_results[0].shape[1]
 
-    voxel_maps = np.zeros((nMaps, nVox))
+    voxel_maps = np.zeros((nMaps, nPerm, nVox))
     voxel_SLcount = np.zeros(nVox)
 
     for idx, sl in enumerate(SL_voxels):
-        for m in range(nMaps):
-            voxel_maps[m,sl] += SL_results[idx][m]
+        if nMaps == 1:
+            voxel_maps[0,:,sl] += SL_results[idx]
+        else:
+            for m in range(nMaps):
+                voxel_maps[m,:,sl] += SL_results[idx][m, :]
         voxel_SLcount[sl] += 1
 
     nz_vox = voxel_SLcount > 0
-    voxel_maps[:, nz_vox] = voxel_maps[:, nz_vox] / voxel_SLcount[nz_vox]
-    voxel_maps[:, ~nz_vox] = np.nan
+    voxel_maps[:, :, nz_vox] = voxel_maps[:, :, nz_vox] / voxel_SLcount[nz_vox]
+    voxel_maps[:, :, ~nz_vox] = np.nan
 
-    voxel_3dmaps = np.full(non_nan_mask.shape + (nMaps,), np.nan)
-    voxel_3dmaps[non_nan_mask,:] = voxel_maps.T
+    vox3d = np.full(non_nan_mask.shape + (nMaps,), np.nan)
+    vox3d[non_nan_mask,:] = voxel_maps[:,0,:].T
 
-    return voxel_3dmaps
+    null_means = voxel_maps[:, 1:, nz_vox].mean(1)
+    null_stds = np.std(voxel_maps[:, 1:, nz_vox], axis=1)
+    p = norm.sf((voxel_maps[:, 0, nz_vox] - null_means)/null_stds)
+    q = np.zeros(p.shape)
+    for m in range(nMaps):
+        q[m,:] = FDR_p(p[m,:])
+
+    q3d = np.full(non_nan_mask.shape + (nMaps,), np.nan)
+    q3d[non_nan_mask,:] = q.T
+
+    return vox3d.squeeze(), q3d.squeeze()
 

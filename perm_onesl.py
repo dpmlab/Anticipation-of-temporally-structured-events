@@ -17,6 +17,7 @@ subjects = ['../data/0814151_predtrw01', '../data/0425161_predtrw02', '../data/0
 header_fpath = data_fpath + 'header.nii'
 
 sl_i = int(sys.argv[1])
+analysis = int(sys.argv[2]) #!!
 perm_start = 0
 perm_end = 100
 
@@ -47,11 +48,11 @@ for group in ['predtrw01', 'predtrw02']:
 sl_h5.close()
 print('  Loaded in', time.time() - load_start, 'seconds')
 
-for analysis_type in range(5):
+for analysis_type in [analysis]:#range(5):
     savename = output_fpath + '/pickles/_' + str(analysis_type) + '_' + str(sl_i) + '_' + str(perm_start) + '_' + str(perm_end) +'_.p'
-    if path.exists(savename):
-        print('Analysis', analysis_type, 'already exists, skipping')
-        continue
+    #if path.exists(savename):
+    #    print('Analysis', analysis_type, 'already exists, skipping')
+    #    continue
 
     print('Analysis', analysis_type)
     if analysis_type == 4:
