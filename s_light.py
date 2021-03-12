@@ -42,7 +42,7 @@ def one_sl(subj_list, subjects, avg_lasts, tune_K, SRM_features):
 
     seg = tj_fit(group_data, n_events=n_events, avg_lasts=avg_lasts)
     
-    return (get_AUCs(seg), n_events)
+    return (get_AUCs(seg), n_events, seg)
 
 def one_sl_SF(group_Intact, group_SFix, avg_lasts):
     AUC_diff_Intact = []
@@ -97,7 +97,7 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
                 elif analysis_type == 3:
                     K = pick_data[1][perm_i]
                     sl_K[sl_i][perm_i] = K
-                    sl_AUCdiffs[sl_i][perm_i] = TR/(K-1) * pick_data[0][perm_i][1:]-pick_data[0][perm_i][0]
+                    sl_AUCdiffs[sl_i][perm_i] = TR/(K-1) * (pick_data[0][perm_i][1:]-pick_data[0][perm_i][0])
                 elif analysis_type == 4:
                     sl_AUCdiffs_Intact[sl_i][perm_i] = TR/(nEvents-1) * pick_data[0][perm_i][1]
                     sl_AUCdiffs_SFix[sl_i][perm_i] = TR/(nEvents-1) * pick_data[1][perm_i][1]
@@ -121,7 +121,7 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
         save_nii(savename + '_mean_q.nii', header_fpath, qvals)
                     
     if analysis_type == 3:
-        vox3d = get_vox_map(sl_K, SL_allvox, non_nan_mask)[0]
+        vox3d = get_vox_map(sl_K, SL_allvox, non_nan_mask, return_q=False)
         save_nii(savename[:-4] + '_K.nii', header_fpath, vox3d)
 
     if analysis_type == 4:
@@ -133,7 +133,7 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
         save_nii(savename + '_SFix_q.nii', header_fpath, qvals_SF)
 
 
-def get_vox_map(SL_results, SL_voxels, non_nan_mask):
+def get_vox_map(SL_results, SL_voxels, non_nan_mask, return_q=True):
     # SL_results is list of sl results, each length perm or size maps x perm
     """Projects searchlight results to voxel maps.
 
@@ -183,6 +183,9 @@ def get_vox_map(SL_results, SL_voxels, non_nan_mask):
 
     vox3d = np.full(non_nan_mask.shape + (nMaps,), np.nan)
     vox3d[non_nan_mask,:] = voxel_maps[:,0,:].T
+
+    if not return_q:
+        return vox3d.squeeze()
 
     null_means = voxel_maps[:, 1:, nz_vox].mean(1)
     null_stds = np.std(voxel_maps[:, 1:, nz_vox], axis=1)

@@ -17,7 +17,6 @@ subjects = ['../data/0814151_predtrw01', '../data/0425161_predtrw02', '../data/0
 header_fpath = data_fpath + 'header.nii'
 
 sl_i = int(sys.argv[1])
-analysis = int(sys.argv[2]) #!!
 perm_start = 0
 perm_end = 100
 
@@ -48,11 +47,11 @@ for group in ['predtrw01', 'predtrw02']:
 sl_h5.close()
 print('  Loaded in', time.time() - load_start, 'seconds')
 
-for analysis_type in [analysis]:#range(5):
+for analysis_type in range(6):
     savename = output_fpath + '/pickles/_' + str(analysis_type) + '_' + str(sl_i) + '_' + str(perm_start) + '_' + str(perm_end) +'_.p'
-    #if path.exists(savename):
-    #    print('Analysis', analysis_type, 'already exists, skipping')
-    #    continue
+    if path.exists(savename):
+        print('Analysis', analysis_type, 'already exists, skipping')
+        continue
 
     print('Analysis', analysis_type)
     if analysis_type == 4:
@@ -62,6 +61,8 @@ for analysis_type in [analysis]:#range(5):
         sl_AUCs = []
         if analysis_type == 3:
             sl_K = []
+        elif analysis_type == 5:
+            sl_segs = []
 
     for i in tqdm(range(perm_start, perm_end)):
         
@@ -108,11 +109,18 @@ for analysis_type in [analysis]:#range(5):
             sl_res = one_sl_SF(group_Intact, group_SFix, True)
             sl_AUCdiffs_Intact.append(sl_res[0])
             sl_AUCdiffs_SFix.append(sl_res[1])
+        elif analysis_type == 5:
+            # SRM10 + Joint fit 6
+            sl_res = one_sl(subj_list, subjects, False, False, 10)
+            sl_AUCs.append(sl_res[0])
+            sl_segs.append(sl_res[2])
 
     with open(savename, 'wb') as fp:
         if analysis_type == 4:
             pickle.dump((sl_AUCdiffs_Intact, sl_AUCdiffs_SFix), fp)
         elif analysis_type == 3:
             pickle.dump((sl_AUCs, sl_K), fp)
+        elif analysis_type == 5:
+            pickle.dump((sl_AUCs, sl_segs), fp)
         else:
             pickle.dump(sl_AUCs, fp)
