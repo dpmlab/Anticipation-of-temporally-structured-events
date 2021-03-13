@@ -22,7 +22,7 @@ def get_s_lights(coords, stride=5, radius=5, min_vox=20):
 
     return SL_allvox
 
-def one_sl(subj_list, subjects, avg_lasts, tune_K, SRM_features):
+def one_sl(subj_list, subjects, avg_lasts, tune_K, SRM_features, n_events=7):
     if tune_K:
         K_range = np.arange(2, 10)
         ll = np.zeros(len(K_range))
@@ -31,8 +31,6 @@ def one_sl(subj_list, subjects, avg_lasts, tune_K, SRM_features):
         for i, K in enumerate(K_range):
             ll[i] = heldout_ll(rep1, K, split)
         n_events = K_range[np.argmax(ll)]
-    else:
-        n_events = 7
 
     if SRM_features == 0:
         group_data = np.mean(subj_list, axis=0)
@@ -44,12 +42,24 @@ def one_sl(subj_list, subjects, avg_lasts, tune_K, SRM_features):
     
     return (get_AUCs(seg), n_events, seg)
 
-def one_sl_SF(group_Intact, group_SFix, avg_lasts):
+def one_sl_SF(Intact_subj_list, SFix_subj_list, avg_lasts, SRM_features):
     AUC_diff_Intact = []
     AUC_diff_SFix = []
-    for group in range(2):
-        AUC_Intact = get_AUCs(tj_fit(group_Intact[group], avg_lasts=avg_lasts))
-        AUC_SFix = get_AUCs(tj_fit(group_SFix[group], avg_lasts=avg_lasts))
+    for group in Intact_subj_list:
+        if SRM_features == 0:
+            group_Intact = np.mean(Intact_subj_list[group], axis=0)
+            group_SFix = np.mean(SFix_subj_list[group], axis=0)
+        else:
+            subj_list = []
+            for s in range(len(Intact_subj_list[group])):
+                subj_list.append(np.concatenate((Intact_subj_list[group][s],SFix_subj_list[group][s]), axis=0))
+            hyp_data = hyperalign(subj_list, nFeatures=SRM_features)
+            group_data = np.mean(hyp_data, axis=0)
+            group_Intact = group_data[:6]
+            group_SFix = group_data[6:]
+
+        AUC_Intact = get_AUCs(tj_fit(group_Intact, avg_lasts=avg_lasts))
+        AUC_SFix = get_AUCs(tj_fit(group_SFix, avg_lasts=avg_lasts))
 
         AUC_diff_Intact.append(AUC_Intact - AUC_Intact[0])
         AUC_diff_SFix.append(AUC_SFix - AUC_SFix[0])
@@ -70,7 +80,7 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
     for sl_i in range(nSL):
         if analysis_type == 0 or analysis_type == 1 or analysis_type == 3:
             sl_AUCdiffs[sl_i] = np.zeros(nPerm)
-        elif analysis_type == 2:
+        elif analysis_type == 2 or analysis_type == 5:
             sl_AUCdiffs[sl_i] = np.zeros((5, nPerm))
 
         if analysis_type == 3:
@@ -101,14 +111,19 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
                 elif analysis_type == 4:
                     sl_AUCdiffs_Intact[sl_i][perm_i] = TR/(nEvents-1) * pick_data[0][perm_i][1]
                     sl_AUCdiffs_SFix[sl_i][perm_i] = TR/(nEvents-1) * pick_data[1][perm_i][1]
+                elif analysis_type == 5:
+                    sl_AUCdiffs[sl_i][:,perm_i] = TR/(nEvents-1) * (pick_data[0][perm_i][1:]-pick_data[0][perm_i][0])
 
+    # if analysis_type == 3:
+    #     print([int(sl_K[i][0]) for i in range(len(sl_K))])
+    #     return
 
     if analysis_type == 0 or analysis_type == 1 or analysis_type == 3:
         vox3d, qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
         save_nii(savename, header_fpath, vox3d)
         save_nii(savename[:-4] + '_q.nii', header_fpath, qvals)
 
-    if analysis_type == 2:
+    if analysis_type == 2 or analysis_type == 5:
         vox3d, qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
         for i in range(vox3d.shape[3]):
             save_nii(savename + '_' + str(i) + '.nii', header_fpath, vox3d[:,:,:,i])

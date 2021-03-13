@@ -19,3 +19,4 @@ with open (data_fpath + 'SL/SL_allvox.p', 'rb') as fp:
 #load_pickle(2, output_fpath + '/pickles/', non_nan, SL_allvox, header_fpath, '../outputs/AUC_jointfit')
 load_pickle(3, output_fpath + '/pickles/', non_nan, SL_allvox, header_fpath, '../outputs/AUC_tuneK.nii')
 #load_pickle(4, output_fpath + '/pickles/', non_nan, SL_allvox, header_fpath, '../outputs/AUC_SF')
+#load_pickle(5, output_fpath + '/pickles/', non_nan, SL_allvox, header_fpath, '../outputs/AUC_S10_jointfit')
