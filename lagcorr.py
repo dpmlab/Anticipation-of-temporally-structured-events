@@ -11,10 +11,11 @@ header_fpath = data_fpath + 'header.nii'
 non_nan = nib.load(data_fpath + 'valid_vox.nii').get_fdata().T > 0
 SL_allvox = pickle.load(open(data_fpath + 'SL/SL_allvox.p', 'rb'))
 
-lag_corr = pickle.load(open('lag_corr.p', 'rb'))
+lag_corr = pickle.load(open('../outputs/AUC_S10_jointfit_lag_corr.p', 'rb'))
 nSL = len(lag_corr)
 max_lag = 10
 nTR = 60
+TR = 1.5
 
 peaklag = nSL*[None]
 for sl_i in range(nSL):
@@ -24,11 +25,9 @@ for sl_i in range(nSL):
             peaklag[sl_i][rep,p] = nearest_peak(lag_corr[sl_i][rep,:,p])
 
 
-peaklagdiff, peaklagdiff_q = get_vox_map([sl[1:,:].mean(0)-sl[0,:] for sl in peaklag], SL_allvox, non_nan)
+peaklagdiff, peaklagdiff_q = get_vox_map([TR*(sl[1:,:].mean(0)-sl[0,:]) for sl in peaklag], SL_allvox, non_nan)
 save_nii('../outputs/peaklagdiff.nii', header_fpath, peaklagdiff)
 save_nii('../outputs/peaklagdiff_q.nii', header_fpath, peaklagdiff_q)
-
-quit()
 
 # peaklag = nSL*[None]
 # for sl_i in range(nSL):
@@ -89,7 +88,7 @@ for sl_i in range(len(SLs)):
     plt.yticks(np.arange(ylim[sl_i,0], ylim[sl_i,1],0.1))
     plt.tight_layout()
     plt.title(str(sl_i))
-    plt.savefig(str(SLs[sl_i])+'.png', dpi=200)
+    plt.savefig('../outputs/' + str(SLs[sl_i])+'.png', dpi=200)
     plt.show()
 
 

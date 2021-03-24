@@ -146,17 +146,18 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
                     sl_shift_corr[sl_i][:,perm_i] = pick_data[perm_i][:]
 
     # Event seg analysis
-    if analysis_type == 5:
-        ev_conv = hrf_convolution(ev_annot_freq())
-        lag_corr = nSL*[None]
-        for sl_i in tqdm(range(nSL)):
-            lag_corr[sl_i] = np.zeros((6, 1 + 2*max_lag, nPerm))
-            for p in range(nPerm):
-                for rep in range(6):
-                    lag_corr[sl_i][rep,:,p] = lag_pearsonr(sl_DT[sl_i][rep,:,p], ev_conv[1:], max_lag)
+    #!! Uncomment
+    # if analysis_type == 5:
+    #     ev_conv = hrf_convolution(ev_annot_freq())
+    #     lag_corr = nSL*[None]
+    #     for sl_i in tqdm(range(nSL)):
+    #         lag_corr[sl_i] = np.zeros((6, 1 + 2*max_lag, nPerm))
+    #         for p in range(nPerm):
+    #             for rep in range(6):
+    #                 lag_corr[sl_i][rep,:,p] = lag_pearsonr(sl_DT[sl_i][rep,:,p], ev_conv[1:], max_lag)
 
-        with open(savename + '_lag_corr.p', 'wb') as fp:
-            pickle.dump(lag_corr, fp)
+    #     with open(savename + '_lag_corr.p', 'wb') as fp:
+    #         pickle.dump(lag_corr, fp)
 
 
     # if analysis_type == 0 or analysis_type == 1 or analysis_type == 3:
@@ -183,7 +184,16 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
             spear = np.zeros((nPerm, 3))
             for p in range(nPerm):
                 spear[p,:] = spearmanr(vals[:,p], coords)[0][0,1:]
-            print('Spearman corr ZYX=',spear[0,:])
+            print('Spearman corr (unmasked) ZYX=',spear[0,:])
+            print('p vals=',norm.sf((spear[0,:]-spear[1:,:].mean(0))/np.std(spear[1:,:], axis=0)))
+
+            qmask = qvals[non_nan_mask] < 0.05
+            coords = coords[qmask,:]
+            vals = vals[qmask,:]
+            spear = np.zeros((nPerm, 3))
+            for p in range(nPerm):
+                spear[p,:] = spearmanr(vals[:,p], coords)[0][0,1:]
+            print('Spearman corr (q<0.05 masked) ZYX=',spear[0,:])
             print('p vals=',norm.sf((spear[0,:]-spear[1:,:].mean(0))/np.std(spear[1:,:], axis=0)))
             
                     
@@ -225,15 +235,15 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
         save_nii(savename + '_diff_mean_q.nii', header_fpath, qvals_diff)
 
     if analysis_type == 8:
-        corrpeak = nSL * [None]
+        corrshift = nSL * [None]
         for sl_i in range(nSL):
-            corrpeak[sl_i] = np.zeros(nPerm)
+            corrshift[sl_i] = np.zeros(nPerm)
             for p in range(nPerm):
-                corrpeak[sl_i][p] = nearest_peak(sl_shift_corr[sl_i][:,p])
+                corrshift[sl_i][p] = TR*(max_lag - nearest_peak(sl_shift_corr[sl_i][:,p]))
 
-        corrpeak_3d, corrpeak_q = get_vox_map(corrpeak, SL_allvox, non_nan_mask)
-        save_nii(savename + '.nii', header_fpath, corrpeak_3d)
-        save_nii(savename + '_q.nii', header_fpath, corrpeak_q)
+        corrshift_3d, corrshift_q = get_vox_map(corrshift, SL_allvox, non_nan_mask)
+        save_nii(savename + '.nii', header_fpath, corrshift_3d)
+        save_nii(savename + '_q.nii', header_fpath, corrshift_q)
 
 
 
