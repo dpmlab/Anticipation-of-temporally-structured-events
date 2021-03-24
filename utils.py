@@ -6,6 +6,29 @@ from scipy.stats import pearsonr, norm, zscore
 from brainiak.eventseg.event import EventSegment
 from brainiak.funcalign.srm import DetSRM
 
+def nearest_peak(v):
+    # v is 2*max_lag + 1
+    # returns quadratic peak
+
+    lag = (len(v)-1)//2
+    while (lag >= 2 and lag <= len(v) - 3):
+        win = v[(lag-1):(lag+2)]
+        if (win[1] > win[0]) and (win[1] > win[2]):
+            break
+        if win[0] > win[2]:
+            lag -= 1
+        else:
+            lag += 1
+
+    x = [lag-1, lag, lag+1]
+    y = v[(lag-1):(lag+2)]
+    denom = (x[0] - x[1]) * (x[0] - x[2]) * (x[1] - x[2])
+    A = (x[2] * (y[1] - y[0]) + x[1] * (y[0] - y[2]) + x[0] * (y[2] - y[1])) / denom
+    B = (x[2]*x[2] * (y[0] - y[1]) + x[1]*x[1] * (y[2] - y[0]) + x[0]*x[0] * (y[1] - y[2])) / denom
+
+    max_x = (-B / (2*A))
+    return min(max(max_x, 0), len(v)-1)
+
 def hyperalign(subj_list, nFeatures=15):
     # subj_list is list of Reps x TRs x Vox matrices
     # returns list of Reps x TRs x nFeatures
@@ -187,10 +210,10 @@ def lag_pearsonr(x, y, max_lags):
 
     for i in range(max_lags + 1):
 
-        # add correlations where y is ahead of x
-        lag_corrs[i + max_lags] = pearsonr(x[:len(x) - i], y[i:len(y)])[0]
+        # add correlations where x is shifted to the right
+        lag_corrs[max_lags + i] = pearsonr(x[:len(x) - i], y[i:len(y)])[0]
 
-        # add correlations where y is behind x
+        # add correlations where x is shifted to the left
         lag_corrs[max_lags - i] = pearsonr(x[i:len(x)], y[:len(y) - i])[0]
 
     return lag_corrs
