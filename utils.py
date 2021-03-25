@@ -219,7 +219,7 @@ def lag_pearsonr(x, y, max_lags):
     return lag_corrs
 
 
-def ev_annot_freq():
+def ev_annot_freq(bootstrap_rng=None):
     """Compute binned frequencies of event boundary annotations
 
     Returns
@@ -229,24 +229,28 @@ def ev_annot_freq():
     """
 
     ev_annots = np.asarray(
-        [5, 12, 54, 77, 90,
-         3, 12, 23, 30, 36, 43, 50, 53, 78, 81, 87, 90,
-         11, 23, 30, 50, 74,
-         1, 55, 75, 90,
-         4, 10, 53, 77, 82, 90,
-         11, 54, 77, 81, 90,
-         12, 22, 36, 54, 78,
-         12, 52, 79, 90,
-         10, 23, 30, 36, 43, 50, 77, 90,
-         13, 55, 79, 90,
-         4, 10, 23, 29, 35, 44, 51, 56, 77, 80, 85, 90,
-         11, 55, 78, 90,
-         11, 30, 43, 54, 77, 90,
-         4, 11, 24, 30, 38, 44, 54, 77, 90]
-    )
+        [[5, 12, 54, 77, 90],
+         [3, 12, 23, 30, 36, 43, 50, 53, 78, 81, 87, 90],
+         [11, 23, 30, 50, 74],
+         [1, 55, 75, 90],
+         [4, 10, 53, 77, 82, 90],
+         [11, 54, 77, 81, 90],
+         [12, 22, 36, 54, 78],
+         [12, 52, 79, 90],
+         [10, 23, 30, 36, 43, 50, 77, 90],
+         [13, 55, 79, 90],
+         [4, 10, 23, 29, 35, 44, 51, 56, 77, 80, 85, 90],
+         [11, 55, 78, 90],
+         [11, 30, 43, 54, 77, 90],
+         [4, 11, 24, 30, 38, 44, 54, 77, 90]],
+    dtype=object)
 
-    frequencies = np.bincount(ev_annots)
-    return np.array(frequencies[1:], dtype=np.float64)/14
+    nAnnots = len(ev_annots)
+
+    if bootstrap_rng is not None:
+        ev_annots = ev_annots[bootstrap_rng.integers(0, nAnnots, size=nAnnots)]
+    frequencies = np.bincount(np.concatenate(ev_annots))
+    return np.array(frequencies[1:], dtype=np.float64)/nAnnots
 
 
 def hrf_convolution(ev_annots_freq):

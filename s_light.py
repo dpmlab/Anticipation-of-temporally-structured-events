@@ -8,6 +8,8 @@ import pickle
 from tqdm import tqdm
 from utils import get_AUCs, tj_fit, save_nii, hyperalign, heldout_ll, FDR_p, get_DTs, ev_annot_freq, hrf_convolution, lag_pearsonr, nearest_peak
 from scipy.stats import norm, spearmanr
+import matplotlib.pyplot as plt
+import nibabel as nib
 
 def get_s_lights(coords, stride=5, radius=5, min_vox=20):
     SL_allvox = []
@@ -115,7 +117,7 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
             sl_shift_corr[sl_i] = np.zeros((2*max_lag+1, nPerm))
 
     pickles = glob.glob(pickle_path + '*.p')
-    for i, pick in enumerate(pickles):
+    for i, pick in tqdm(enumerate(pickles)):
         pick_parts = pick.split('_')
         analysis_i = int(pick_parts[1])
         sl_i = int(pick_parts[2])
@@ -146,18 +148,17 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
                     sl_shift_corr[sl_i][:,perm_i] = pick_data[perm_i][:]
 
     # Event seg analysis
-    #!! Uncomment
-    # if analysis_type == 5:
-    #     ev_conv = hrf_convolution(ev_annot_freq())
-    #     lag_corr = nSL*[None]
-    #     for sl_i in tqdm(range(nSL)):
-    #         lag_corr[sl_i] = np.zeros((6, 1 + 2*max_lag, nPerm))
-    #         for p in range(nPerm):
-    #             for rep in range(6):
-    #                 lag_corr[sl_i][rep,:,p] = lag_pearsonr(sl_DT[sl_i][rep,:,p], ev_conv[1:], max_lag)
+    if analysis_type == 5:
+        ev_conv = hrf_convolution(ev_annot_freq())
+        lag_corr = nSL*[None]
+        for sl_i in tqdm(range(nSL)):
+            lag_corr[sl_i] = np.zeros((6, 1 + 2*max_lag, nPerm))
+            for p in range(nPerm):
+                for rep in range(6):
+                    lag_corr[sl_i][rep,:,p] = lag_pearsonr(sl_DT[sl_i][rep,:,p], ev_conv[1:], max_lag)
 
-    #     with open(savename + '_lag_corr.p', 'wb') as fp:
-    #         pickle.dump(lag_corr, fp)
+        with open(savename + '_lag_corr.p', 'wb') as fp:
+            pickle.dump(lag_corr, fp)
 
 
     # if analysis_type == 0 or analysis_type == 1 or analysis_type == 3:
@@ -173,28 +174,51 @@ def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpat
 
         for sl_i in range(nSL):
             sl_AUCdiffs[sl_i] = sl_AUCdiffs[sl_i].mean(0)
-        vox3d, qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
-        save_nii(savename + '_mean.nii', header_fpath, vox3d)
-        save_nii(savename + '_mean_q.nii', header_fpath, qvals)
+        AUC_vox3d, AUC_qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
+        save_nii(savename + '_mean.nii', header_fpath, AUC_vox3d)
+        save_nii(savename + '_mean_q.nii', header_fpath, AUC_qvals)
 
         if analysis_type == 5:
-            coords = np.transpose(np.where(non_nan_mask))
+            # Correlate AUC with coordinates
+            coords_nonnan = np.transpose(np.where(non_nan_mask))
             perm_maps = get_vox_map([sl[:,np.newaxis] for sl in sl_AUCdiffs], SL_allvox, non_nan_mask, return_q = False)
-            vals = perm_maps[non_nan_mask]
+
+            AUC_nonnan = perm_maps[non_nan_mask]
             spear = np.zeros((nPerm, 3))
             for p in range(nPerm):
-                spear[p,:] = spearmanr(vals[:,p], coords)[0][0,1:]
-            print('Spearman corr (unmasked) ZYX=',spear[0,:])
+                spear[p,:] = spearmanr(AUC_nonnan[:,p], coords_nonnan)[0][0,1:]
+            print('Spearman corr w/coords (unmasked) ZYX=',spear[0,:])
             print('p vals=',norm.sf((spear[0,:]-spear[1:,:].mean(0))/np.std(spear[1:,:], axis=0)))
 
-            qmask = qvals[non_nan_mask] < 0.05
-            coords = coords[qmask,:]
-            vals = vals[qmask,:]
+            qmask = AUC_qvals[non_nan_mask] < 0.05
+
+            coords_q05 = coords_nonnan[qmask,:]
+            AUC_q05 = AUC_nonnan[qmask,:]
             spear = np.zeros((nPerm, 3))
             for p in range(nPerm):
-                spear[p,:] = spearmanr(vals[:,p], coords)[0][0,1:]
-            print('Spearman corr (q<0.05 masked) ZYX=',spear[0,:])
+                spear[p,:] = spearmanr(AUC_q05[:,p], coords_q05)[0][0,1:]
+            print('Spearman corr w/coords (q<0.05 masked) ZYX=',spear[0,:])
             print('p vals=',norm.sf((spear[0,:]-spear[1:,:].mean(0))/np.std(spear[1:,:], axis=0)))
+
+
+            # Correlate K map and AUC map
+            K = nib.load('../outputs/AUC_tuneK_K.nii').get_fdata().T
+            K_nonnan = K[non_nan_mask]
+            K_q05 = K_nonnan[qmask]
+
+            K_spear = np.zeros(nPerm)
+            for p in range(nPerm):
+                K_spear[p] = spearmanr(AUC_q05[:,p], 90/K_q05)[0]
+            print('Spearman corr w/K (q<0.05 masked) =',K_spear[0])
+            print('p val=',norm.sf((K_spear[0]-K_spear[1:].mean(0))/np.std(K_spear[1:])))
+
+            K_round = np.around(K_q05)
+            for k in range(2,9):
+                plt.violinplot(AUC_q05[K_round == k, 0], positions=[9-k], showextrema=False)
+            plt.xticks(np.arange(1,8), [round(90/(9-x)) for x in np.arange(1,8)])
+            plt.xlabel('Optimal event timescale (seconds)')
+            plt.ylabel('Prediction (seconds)')
+            plt.savefig('../outputs/KvsPred.png')
             
                     
     if analysis_type == 3:
