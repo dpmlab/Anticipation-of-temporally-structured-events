@@ -1,84 +1,77 @@
 import glob
-from copy import deepcopy
-import random
-from scipy.ndimage.morphology import binary_dilation
-from scipy.ndimage.measurements import label
+import pickle
+import tables
 import nibabel as nib
 import numpy as np
-from Dataset import Dataset, save_rois
-from utils import ev_annot_freq, hrf_convolution, bootstrap_stats, mask_nii
-from lagcorr import lag_corr
-from s_light import run_s_light_auc
+from numpy.random import default_rng
+from data import find_valid_vox, save_s_lights
+from s_light import optimal_events, compile_optimal_events, \
+                    fit_HMM, compile_fit_HMM, \
+                    shift_corr, compile_shift_corr
 
-data_fpath = '../data/'
-output_fpath = '../outputs/'
-subjects = glob.glob(data_fpath + '*pred*')
-header_fpath = '../data/0411161_predtrw02/filtFuncMNI_Intact_Rep5.nii'
+nSL = 5354
+nPerm = 100
+max_lag = 10
+subjects = glob.glob('../data/*predtrw*')
+header_fpath = '../data/0407161_predtrw02/filtFuncMNI_Intact_Rep1.nii'
 
+# Create valid_vox.nii mask
+find_valid_vox('../data/', subjects)
 
-# Load full (non-bootstrapped) dataset
-dset = Dataset()
-dset.load_data(data_fpath, subjects, 'filt*Intact*')
-valid_vox = deepcopy(dset.non_nan_mask)
+# Create a separate data file for each searchlight
+non_nan = nib.load('../data/valid_vox.nii').get_fdata().T > 0
+save_s_lights('../data/', non_nan, '../data/SL/')
 
+# Run all analyses in each searchlight
+# This will take ~1000 CPU hours, and so should be run
+# in parallel on a cluster if possible
+for sl_i in range(nSL):
 
-# Run searchlight analysis
-run_s_light_auc(dset, output_fpath + 'AUC.nii', header_fpath)
-
-
-# Run searchlight bootstraps
-n_resamp = 100
-for resamp in range(n_resamp):
-    resamp_subjs = [random.choice(subjects) for s in range(len(subjects))]
-    dset.load_data(data_fpath, resamp_subjs, 'filt*Intact*')
-    dset.non_nan_mask = valid_vox
-    bootpath = output_fpath + 'boot/AUC_boot' + str(resamp) + '.nii'
-    run_s_light_auc(dset, bootpath, header_fpath)
-bootstrap_stats(output_fpath + 'boot/AUC_boot*.nii',
-                output_fpath + 'AUC_q.nii')
-
-# Mask analysis by bootstrapped statistics
-mask_nii(output_fpath + 'AUC.nii', output_fpath + 'AUC_q.nii',
-         output_fpath + 'AUC_q05.nii')
+    # Load data for this searchlight
+    sl_h5 = tables.open_file('../data/SL/%d.h5' % sl_i, mode='r')
+    data_list_orig = []
+    for subj in subjects:
+        subjname = '/subj_' + subj.split('/')[-1]
+        d = sl_h5.get_node(subjname, 'Intact').read()
+        data_list_orig.append(d)
+    sl_h5.close()
+    nSubj = len(data_list_orig)
 
 
-# Identify significant clusters
-AUC_results = nib.load(output_fpath + 'AUC_q05.nii').get_fdata().T
-clusters = label(AUC_results, structure=np.ones((3, 3, 3)))[0]
-rois = binary_dilation(clusters,
-                       structure=np.ones((5, 5, 5), dtype=bool)).astype(int)
-rois = label(rois, structure=np.ones((3, 3, 3)))[0]
+    sl_K = []
+    sl_seg = []
+    sl_shift_corr = []
+    rng = default_rng(0)
+    # Repeat analyses for each permutation
+    for p in range(nPerm):
+        data_list = []
+        for s in range(nSubj):
+            if p == 0:
+                # This is the real (non-permuted) analysis
+                subj_perm = np.arange(6)
+            else:
+                subj_perm = rng.permutation(6)
+            data_list.append(data_list_orig[s][subj_perm])
 
+        # Run all three analysis types
+        sl_K.append(optimal_events(data_list, subjects))
+        sl_seg.append(fit_HMM(data_list))
+        sl_shift_corr.append(shift_corr(data_list, max_lag))
 
-# Save ROI datasets
-save_rois(data_fpath, subjects, 'filt*Intact*', rois > 0,
-          output_fpath + 'rois/')
+    # Save results for this searchlight
+    pickle.dump(sl_K,
+                open('../outputs/perm/optimal_events_%d.p' % sl_i, 'wb'))
+    pickle.dump(sl_seg,
+                open('../outputs/perm/fit_HMM_%d.p' % sl_i, 'wb'))
+    pickle.dump(sl_shift_corr,
+                open('../outputs/perm/shift_corr_%d.p' % sl_i, 'wb'))
 
-# Run lag correlation analysis
-max_lag = 7
-ev_conv = hrf_convolution(ev_annot_freq())
-dset.load_rois(output_fpath + 'rois/', subjects)
-first_lagcorr, lasts_lagcorr = lag_corr(dset, rois, ev_conv, max_lag,
-                                        header_fpath, output_fpath + 'lagcorr')
-
-n_rois = int(np.max(rois))
-cluster_lagcorrs = np.zeros((2, n_rois, 1 + 2*max_lag))
-for cluster in range(1, n_rois + 1):
-    mask = rois == cluster
-    cluster_lagcorrs[0, cluster-1, :] = first_lagcorr[mask][0]
-    cluster_lagcorrs[1, cluster-1, :] = lasts_lagcorr[mask][0]
-np.save(output_fpath + 'lagcorrs.npy', cluster_lagcorrs)
-
-# Run lag correlation bootstraps
-n_resamp = 1000
-for resamp in range(n_resamp):
-    resamp_subjs = [random.choice(subjects) for s in range(len(subjects))]
-    dset.load_rois(output_fpath + 'rois/', resamp_subjs)
-    bootpath = output_fpath + 'boot/lagcorr_boot' + str(resamp)
-    lag_corr(dset, rois, ev_conv, max_lag, header_fpath, bootpath)
-bootstrap_stats(output_fpath + 'boot/lagcorr_boot*first.nii',
-                output_fpath + 'lagcorr_first_p.nii', use_z = False)
-bootstrap_stats(output_fpath + 'boot/lagcorr_boot*lasts.nii',
-                output_fpath + 'lagcorr_lasts_p.nii', use_z = False)
-bootstrap_stats(output_fpath + 'boot/lagcorr_boot*diff.nii',
-                output_fpath + 'lagcorr_diff_p.nii', use_z = False)
+# Compile results into final maps
+SL_allvox = pickle.load(open('../data/SL/SL_allvox.p', 'rb'))
+compile_optimal_events('../outputs/perm/', non_nan, SL_allvox,
+                        header_fpath, '../outputs/')
+opt_event = nib.load('optimal_events.nii').get_fdata().T
+compile_fit_HMM('../outputs/perm/', non_nan, SL_allvox,
+                header_fpath, '../outputs/', opt_event)
+compile_shift_corr('../outputs/perm/', non_nan, SL_allvox,
+                   header_fpath, '../outputs')

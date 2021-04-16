@@ -1,17 +1,38 @@
-from copy import deepcopy
-import time
-import numpy as np
-from scipy.spatial.distance import cdist
-import tables
-import glob
 import pickle
-from tqdm import tqdm
-from utils import get_AUCs, tj_fit, save_nii, hyperalign, heldout_ll, FDR_p, get_DTs, ev_annot_freq, hrf_convolution, lag_pearsonr, nearest_peak
+import numpy as np
+from numpy.random import default_rng
+from scipy.spatial.distance import cdist
 from scipy.stats import norm, spearmanr
-import matplotlib.pyplot as plt
-import nibabel as nib
+from utils import get_AUCs, tj_fit, save_nii, hyperalign, heldout_ll, FDR_p, \
+                  get_DTs, ev_annot_freq, hrf_convolution, lag_pearsonr, \
+                  nearest_peak
+
 
 def get_s_lights(coords, stride=5, radius=5, min_vox=20):
+    """Defines a grid of searchlights
+
+    Defines a grid from 0 to the maximum coordinate in each dimension, with
+    distance between grid points = stride. Each grid point is the center of a
+    circular searchlight, which includes all coords within the defined
+    radius. Searchlights with fewer than min_vox coordinates are discarded.
+
+    Parameters
+    ----------
+    coords : ndarray
+        V x 3 array, listing XYZ coordinates of all valid voxels
+    stride : int
+        Grid spacing
+    radius : float
+        Size of searchlight spheres
+    min_vox : int
+        Minimum number of voxels for a valid searchlight
+
+    Returns
+    -------
+    list of ndarrays
+        Each list element is the indices of coordinates in a searchlight
+    """
+
     SL_allvox = []
 
     for x in range(0, np.max(coords, axis=0)[0] + stride, stride):
@@ -24,275 +45,290 @@ def get_s_lights(coords, stride=5, radius=5, min_vox=20):
 
     return SL_allvox
 
-def one_sl(subj_list, subjects, avg_lasts, tune_K, SRM_features, n_events=7):
-    if tune_K:
-        K_range = np.arange(2, 10)
-        ll = np.zeros(len(K_range))
-        split = np.array([('predtrw01' in s) for s in subjects])
-        rep1 = np.array([d[0] for d in subj_list])
-        for i, K in enumerate(K_range):
-            ll[i] = heldout_ll(rep1, K, split)
-        n_events = K_range[np.argmax(ll)]
+def optimal_events(data_list, subjects):
+    """Find optimal number of events according to log-likelihood on first rep
 
-    if SRM_features == 0:
-        group_data = np.mean(subj_list, axis=0)
-    else:
-        hyp_data = hyperalign(subj_list, nFeatures=SRM_features)
-        group_data = np.mean(hyp_data, axis=0)
+    The event segmentation model is fit with varying number of events, and
+    the optimal number of events is chosen based on held-out log-likelihood
+    on the first repetition. The subjects are split into training and testing
+    halves based on whether they were in the trw01 or trw02 group.
 
-    seg = tj_fit(group_data, n_events=n_events, avg_lasts=avg_lasts)
-    
-    return (get_AUCs(seg), n_events, seg)
+    Parameters
+    ----------
+    data_list : list of ndarrays
+        List of Reps x TRs x Vox arrays for each subject
+    subjects : list of strings
+        Names of all subjects
 
-def one_sl_shift(subj_list, max_shift):
-    group_data = np.mean(subj_list, axis=0).mean(2) # Rep x TR
-    rep1 = group_data[0,:]
-    rep2_6 = group_data[1:,:].mean(0)
+    Returns
+    -------
+    int
+        Number of events with highest log-likelihood
+    """
 
-    shift_corr = lag_pearsonr(rep1, rep2_6, max_shift)
+    K_range = np.arange(2, 10)
+    ll = np.zeros(len(K_range))
+    split = np.array([('predtrw01' in s) for s in subjects])
+    rep1 = np.array([d[0] for d in data_list])
+    for i, K in enumerate(K_range):
+        ll[i] = heldout_ll(rep1, K, split)
+    return K_range[np.argmax(ll)]
 
-    return shift_corr
+def compile_optimal_events(pickle_path, non_nan_mask, SL_allvox,
+                           header_fpath, save_path):
+    """Create MNI map of optimal event numbers
+
+    Parameters
+    ----------
+    pickle_path : string
+        Filepath to where pickles were saved for each searchlight
+    non_nan_mask : ndarray
+        3d boolean mask of valid voxels
+    SL_allvox : list of ndarrays
+        List of voxel indices for each searchlight
+    header_fpath : string
+        Filepath of nii file with header to use as a template
+    save_path : string
+        Location of output directory
+    """
+
+    nSL = 5354
+
+    sl_K = nSL*[None]
+    for sl_i in range(nSL):
+        pickle_fname = '%soptimal_events_%d.p' % (pickle_path, sl_i)
+        sl_K[sl_i] = pickle.load(open(pickle_fname, 'rb'))
+
+    K_vox3d = get_vox_map(sl_K, SL_allvox, non_nan_mask, return_q=False)
+    save_nii(save_path + 'optimal_events.nii', header_fpath, K_vox3d)
 
 
-def one_sl_SF(Intact_subj_list, SFix_subj_list, avg_lasts, SRM_features):
-    AUC_diff_Intact = []
-    AUC_diff_SFix = []
-    for group in Intact_subj_list:
-        if SRM_features == 0:
-            group_Intact = np.mean(Intact_subj_list[group], axis=0)
-            group_SFix = np.mean(SFix_subj_list[group], axis=0)
-        else:
-            subj_list = []
-            for s in range(len(Intact_subj_list[group])):
-                subj_list.append(np.concatenate((Intact_subj_list[group][s],SFix_subj_list[group][s]), axis=0))
-            hyp_data = hyperalign(subj_list, nFeatures=SRM_features)
-            group_data = np.mean(hyp_data, axis=0)
-            group_Intact = group_data[:6]
-            group_SFix = group_data[6:]
+def fit_HMM(data_list):
+    """Hyperalign and fit HMM to data in one searchlight
 
-        AUC_Intact = get_AUCs(tj_fit(group_Intact, avg_lasts=avg_lasts))
-        AUC_SFix = get_AUCs(tj_fit(group_SFix, avg_lasts=avg_lasts))
+    Parameters
+    ----------
+    data_list : list of ndarrays
+        List of Reps x TRs x Vox arrays for each subject
 
-        AUC_diff_Intact.append(AUC_Intact - AUC_Intact[0])
-        AUC_diff_SFix.append(AUC_SFix - AUC_SFix[0])
+    Returns
+    -------
+    list of ndarrays
+        List of segmentations for each repetition
+    """
+    hyp_data = hyperalign(data_list)
+    group_data = np.mean(hyp_data, axis=0)
 
-    return (np.mean(AUC_diff_Intact, axis=0),
-            np.mean(AUC_diff_SFix, axis=0))
+    return tj_fit(group_data)
 
-def load_pickle(analysis_type, pickle_path, non_nan_mask, SL_allvox, header_fpath, savename):
+def compile_fit_HMM(pickle_path, non_nan_mask, SL_allvox,
+                    header_fpath, save_path, opt_event):
+    """Create MNI map of HMM fits and compute statistics
+
+    Parameters
+    ----------
+    pickle_path : string
+        Filepath to where pickles were saved for each searchlight
+    non_nan_mask : ndarray
+        3d boolean mask of valid voxels
+    SL_allvox : list of ndarrays
+        List of voxel indices for each searchlight
+    header_fpath : string
+        Filepath of nii file with header to use as a template
+    save_path : string
+        Location of output directory
+    opt_event : ndarray
+        3d volume, result of optimal_event analysis
+    """
+
     nSL = 5354
     nPerm = 100
     TR = 1.5
-    nTR = 60
     nEvents = 7
     max_lag = 10
 
+    ev_conv = hrf_convolution(ev_annot_freq())
+    lag_corr = nSL*[None]
     sl_AUCdiffs = nSL*[None]
-    sl_K = nSL*[None]
-    sl_AUCdiffs_Intact = nSL*[None]
-    sl_AUCdiffs_SFix = nSL*[None]
-    sl_DT = nSL*[None]
-    sl_shift_corr = nSL*[None]
+    peak_shift = nSL*[None]
+
+    # Load data from all searchlights
     for sl_i in range(nSL):
-        if analysis_type == 0 or analysis_type == 1 or analysis_type == 3:
-            sl_AUCdiffs[sl_i] = np.zeros(nPerm)
-        elif analysis_type == 2 or analysis_type == 5 or analysis_type == 7:
-            sl_AUCdiffs[sl_i] = np.zeros((5, nPerm))
+        sl_AUCdiffs[sl_i] = np.zeros((6-1, nPerm))
+        lag_corr[sl_i] = np.zeros((6, 1 + 2*max_lag, nPerm))
+        peak_shift[sl_i] = np.zeros(nPerm)
 
-        if analysis_type == 3:
-            sl_K[sl_i] = np.zeros(nPerm)
+        pickle_fname = '%sfit_HMM_%d.p' % (pickle_path, sl_i)
+        pick_data = pickle.load(open(pickle_fname, 'rb'))
 
-        if analysis_type == 4:
-            sl_AUCdiffs_Intact[sl_i] = np.zeros(nPerm)
-            sl_AUCdiffs_SFix[sl_i] = np.zeros(nPerm)
+        # Compute anticipation and shift in correlation with annotations
+        for p in range(nPerm):
+            seg = pick_data[p]
+            AUC = get_AUCs(seg)
+            sl_AUCdiffs[sl_i][:,p] = TR/(nEvents-1) * (AUC[1:]-AUC[0])
+            peaks = np.zeros(6)
+            for rep in range(6):
+                sl_DT = get_DTs(seg[rep])
+                lag_corr[sl_i][rep,:,p] = lag_pearsonr(sl_DT, ev_conv[1:],
+                                                       max_lag)
+                peaks[rep] = nearest_peak(lag_corr[sl_i][rep,:,p])
+            peak_shift[sl_i][p] = TR*(peaks[1:].mean(0)-peaks[0])
 
-        if analysis_type == 5:
-            sl_DT[sl_i] = np.zeros((6,nTR-1,nPerm))
-
-        if analysis_type == 6:
-            sl_AUCdiffs_Intact[sl_i] = np.zeros((5, nPerm))
-            sl_AUCdiffs_SFix[sl_i] = np.zeros((5, nPerm))
-
-        if analysis_type == 8:
-            sl_shift_corr[sl_i] = np.zeros((2*max_lag+1, nPerm))
-
-    pickles = glob.glob(pickle_path + '*.p')
-    for i, pick in tqdm(enumerate(pickles)):
-        pick_parts = pick.split('_')
-        analysis_i = int(pick_parts[1])
-        sl_i = int(pick_parts[2])
-
-        if analysis_i == analysis_type:
-            with open (pick, 'rb') as fp:
-                pick_data = pickle.load(fp)
-            for perm_i in range(100):
-                if analysis_type == 0 or analysis_type == 1:
-                    sl_AUCdiffs[sl_i][perm_i] = TR/(nEvents-1) * (pick_data[perm_i][1]-pick_data[perm_i][0])
-                elif analysis_type == 2 or analysis_type == 7:
-                    sl_AUCdiffs[sl_i][:,perm_i] = TR/(nEvents-1) * (pick_data[perm_i][1:]-pick_data[perm_i][0])
-                elif analysis_type == 3:
-                    K = pick_data[1][perm_i]
-                    sl_K[sl_i][perm_i] = K
-                    sl_AUCdiffs[sl_i][perm_i] = TR/(K-1) * (pick_data[0][perm_i][1:]-pick_data[0][perm_i][0])
-                elif analysis_type == 4:
-                    sl_AUCdiffs_Intact[sl_i][perm_i] = TR/(nEvents-1) * pick_data[0][perm_i][1]
-                    sl_AUCdiffs_SFix[sl_i][perm_i] = TR/(nEvents-1) * pick_data[1][perm_i][1]
-                elif analysis_type == 5:
-                    sl_AUCdiffs[sl_i][:,perm_i] = TR/(nEvents-1) * (pick_data[0][perm_i][1:]-pick_data[0][perm_i][0])
-                    for rep in range(6):
-                        sl_DT[sl_i][rep,:,perm_i] = get_DTs(pick_data[1][perm_i][rep])
-                elif analysis_type == 6:
-                    sl_AUCdiffs_Intact[sl_i][:,perm_i] = TR/(nEvents-1) * pick_data[0][perm_i][1:]
-                    sl_AUCdiffs_SFix[sl_i][:,perm_i] = TR/(nEvents-1) * pick_data[1][perm_i][1:]
-                elif analysis_type == 8:
-                    sl_shift_corr[sl_i][:,perm_i] = pick_data[perm_i][:]
-
-    # Event seg analysis
-    if analysis_type == 5:
-        ev_conv = hrf_convolution(ev_annot_freq())
-        lag_corr = nSL*[None]
-        for sl_i in tqdm(range(nSL)):
-            lag_corr[sl_i] = np.zeros((6, 1 + 2*max_lag, nPerm))
-            for p in range(nPerm):
+        # Compute statistics for SLs for Figure 5
+        if sl_i in [2614, 1479, 1054]:
+            nBoot = 100
+            bootstrap_rng = default_rng(0)
+            boot_peak = np.zeros((nBoot, 6))
+            for b in range(nBoot):
+                ev_conv = hrf_convolution(ev_annot_freq(bootstrap_rng))
                 for rep in range(6):
-                    lag_corr[sl_i][rep,:,p] = lag_pearsonr(sl_DT[sl_i][rep,:,p], ev_conv[1:], max_lag)
+                    sl_DT = get_DTs(pick_data[0][rep])
+                    boot_lag = lag_pearsonr(sl_DT, ev_conv[1:], max_lag)
+                    boot_peak[b,rep] = nearest_peak(boot_lag)
+            CI_init = TR*(max_lag - np.sort(boot_peak[:,0])[[5,95-1]])
+            CI_rep = TR*(max_lag - np.sort(boot_peak[:,1:].mean(1))[[5,95-1]])
 
-        with open(savename + '_lag_corr.p', 'wb') as fp:
-            pickle.dump(lag_corr, fp)
+            print('%d: First Peak CI = %f, Rep Peak CI = %f' %
+                  (sl_i, CI_init, CI_rep))
 
-
-    # if analysis_type == 0 or analysis_type == 1 or analysis_type == 3:
-    #     vox3d, qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
-    #     save_nii(savename + '.nii', header_fpath, vox3d)
-    #     save_nii(savename + '_q.nii', header_fpath, qvals)
-
-    if analysis_type == 2 or analysis_type == 5 or analysis_type == 7:
-        vox3d, qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
-        for i in range(vox3d.shape[3]):
-            save_nii(savename + '_' + str(i) + '.nii', header_fpath, vox3d[:,:,:,i])
-            save_nii(savename + '_' + str(i) + '_q.nii', header_fpath, qvals[:,:,:,i])
-
-        for sl_i in range(nSL):
-            sl_AUCdiffs[sl_i] = sl_AUCdiffs[sl_i].mean(0)
-        AUC_vox3d, AUC_qvals = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
-        save_nii(savename + '_mean.nii', header_fpath, AUC_vox3d)
-        save_nii(savename + '_mean_q.nii', header_fpath, AUC_qvals)
-
-        if analysis_type == 5:
-            # Correlate AUC with coordinates
-            coords_nonnan = np.transpose(np.where(non_nan_mask))
-            perm_maps = get_vox_map([sl[:,np.newaxis] for sl in sl_AUCdiffs], SL_allvox, non_nan_mask, return_q = False)
-
-            AUC_nonnan = perm_maps[non_nan_mask]
-            spear = np.zeros((nPerm, 3))
-            for p in range(nPerm):
-                spear[p,:] = spearmanr(AUC_nonnan[:,p], coords_nonnan)[0][0,1:]
-            print('Spearman corr w/coords (unmasked) ZYX=',spear[0,:])
-            print('p vals=',norm.sf((spear[0,:]-spear[1:,:].mean(0))/np.std(spear[1:,:], axis=0)))
-
-            qmask = AUC_qvals[non_nan_mask] < 0.05
-
-            coords_q05 = coords_nonnan[qmask,:]
-            AUC_q05 = AUC_nonnan[qmask,:]
-            spear = np.zeros((nPerm, 3))
-            for p in range(nPerm):
-                spear[p,:] = spearmanr(AUC_q05[:,p], coords_q05)[0][0,1:]
-            print('Spearman corr w/coords (q<0.05 masked) ZYX=',spear[0,:])
-            print('p vals=',norm.sf((spear[0,:]-spear[1:,:].mean(0))/np.std(spear[1:,:], axis=0)))
+    # Create map of shifts in peak correlation with annotations
+    pldiff, pldiff_q = get_vox_map(peak_shift, SL_allvox, non_nan_mask)
+    save_nii(save_path + 'peaklagdiff.nii', header_fpath, pldiff)
+    save_nii(save_path + 'peaklagdiff_q.nii', header_fpath, pldiff_q)
 
 
-            # Correlate K map and AUC map
-            K = nib.load('../outputs/AUC_tuneK_K.nii').get_fdata().T
-            K_nonnan = K[non_nan_mask]
-            K_q05 = K_nonnan[qmask]
+    # Create anticipation maps for each repetition and the average
+    AUCdiff, AUCdiff_q = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
+    for i in range(AUCdiff.shape[3]):
+        save_nii(save_path + 'AUCdiff_' + str(i) + '.nii', header_fpath,
+                 AUCdiff[:,:,:,i])
+        save_nii(save_path + 'AUCdiff_' + str(i) + '_q.nii', header_fpath,
+                 AUCdiff_q[:,:,:,i])
 
-            K_spear = np.zeros(nPerm)
-            for p in range(nPerm):
-                K_spear[p] = spearmanr(AUC_q05[:,p], 90/K_q05)[0]
-            print('Spearman corr w/K (q<0.05 masked) =',K_spear[0])
-            print('p val=',norm.sf((K_spear[0]-K_spear[1:].mean(0))/np.std(K_spear[1:])))
+    for sl_i in range(nSL):
+        sl_AUCdiffs[sl_i] = sl_AUCdiffs[sl_i].mean(0)
+    AUCdiff, AUCdiff_q = get_vox_map(sl_AUCdiffs, SL_allvox, non_nan_mask)
+    save_nii(save_path + 'AUCdiff_' + str(i) + '_mean.nii', header_fpath,
+             AUCdiff)
+    save_nii(save_path + 'AUCdiff_' + str(i) + '_mean_q.nii', header_fpath,
+             AUCdiff_q)
 
-            K_round = np.around(K_q05)
-            for k in range(2,9):
-                plt.violinplot(AUC_q05[K_round == k, 0], positions=[9-k], showextrema=False)
-            plt.xticks(np.arange(1,8), [round(90/(9-x)) for x in np.arange(1,8)])
-            plt.xlabel('Optimal event timescale (seconds)')
-            plt.ylabel('Prediction (seconds)')
-            plt.savefig('../outputs/KvsPred.png')
-            
-                    
-    if analysis_type == 3:
-        vox3d = get_vox_map(sl_K, SL_allvox, non_nan_mask, return_q=False)
-        save_nii(savename + '_K.nii', header_fpath, vox3d)
+    # Correlate anticipation with coordinates
+    coords_nonnan = np.transpose(np.where(non_nan_mask))
+    perm_maps = get_vox_map([sl[:,np.newaxis] for sl in sl_AUCdiffs],
+                            SL_allvox, non_nan_mask, return_q = False)
 
+    AUC_nonnan = perm_maps[non_nan_mask]
+    spear = np.zeros((nPerm, 3))
+    for p in range(nPerm):
+        spear[p,:] = spearmanr(AUC_nonnan[:,p], coords_nonnan)[0][0,1:]
+    print('Spearman corr w/coords (unmasked) ZYX=', spear[0,:])
+    z = (spear[0,:]-spear[1:,:].mean(0))/np.std(spear[1:,:], axis=0)
+    print('p vals=', norm.sf(z))
 
-    # if analysis_type == 4:
-    #     vox3d_I, qvals_I = get_vox_map(sl_AUCdiffs_Intact, SL_allvox, non_nan_mask)
-    #     vox3d_SF, qvals_SF = get_vox_map(sl_AUCdiffs_SFix, SL_allvox, non_nan_mask)
-    #     save_nii(savename + '_Intact.nii', header_fpath, vox3d_I)
-    #     save_nii(savename + '_Intact_q.nii', header_fpath, qvals_I)
-    #     save_nii(savename + '_SFix.nii', header_fpath, vox3d_SF)
-    #     save_nii(savename + '_SFix_q.nii', header_fpath, qvals_SF)
-
-    if analysis_type == 6:
-        vox3d_I, qvals_I = get_vox_map(sl_AUCdiffs_Intact, SL_allvox, non_nan_mask)
-        vox3d_SF, qvals_SF = get_vox_map(sl_AUCdiffs_SFix, SL_allvox, non_nan_mask)
-        for i in range(vox3d_I.shape[3]):
-            save_nii(savename + '_Intact_' + str(i) + '.nii', header_fpath, vox3d_I[:,:,:,i])
-            save_nii(savename + '_Intact_' + str(i) + '_q.nii', header_fpath, qvals_I[:,:,:,i])
-            save_nii(savename + '_SFix_' + str(i) + '.nii', header_fpath, vox3d_SF[:,:,:,i])
-            save_nii(savename + '_SFix_' + str(i) + '_q.nii', header_fpath, qvals_SF[:,:,:,i])
-        
-        sl_CondDiff = []
-        for sl_i in range(nSL):
-            sl_AUCdiffs_Intact[sl_i] = sl_AUCdiffs_Intact[sl_i].mean(0)
-            sl_AUCdiffs_SFix[sl_i] = sl_AUCdiffs_SFix[sl_i].mean(0)
-            sl_CondDiff.append(sl_AUCdiffs_Intact[sl_i]-sl_AUCdiffs_SFix[sl_i])
-        vox3d_I, qvals_I = get_vox_map(sl_AUCdiffs_Intact, SL_allvox, non_nan_mask)
-        vox3d_SF, qvals_SF = get_vox_map(sl_AUCdiffs_SFix, SL_allvox, non_nan_mask)
-        vox3d_diff, qvals_diff = get_vox_map(sl_CondDiff, SL_allvox, non_nan_mask)
-        save_nii(savename + '_Intact_mean.nii', header_fpath, vox3d_I)
-        save_nii(savename + '_Intact_mean_q.nii', header_fpath, qvals_I)
-        save_nii(savename + '_SFix_mean.nii', header_fpath, vox3d_SF)
-        save_nii(savename + '_SFix_mean_q.nii', header_fpath, qvals_SF)
-        save_nii(savename + '_diff_mean.nii', header_fpath, vox3d_diff)
-        save_nii(savename + '_diff_mean_q.nii', header_fpath, qvals_diff)
-
-    if analysis_type == 8:
-        corrshift = nSL * [None]
-        for sl_i in range(nSL):
-            corrshift[sl_i] = np.zeros(nPerm)
-            for p in range(nPerm):
-                corrshift[sl_i][p] = TR*(max_lag - nearest_peak(sl_shift_corr[sl_i][:,p]))
-
-        corrshift_3d, corrshift_q = get_vox_map(corrshift, SL_allvox, non_nan_mask)
-        save_nii(savename + '.nii', header_fpath, corrshift_3d)
-        save_nii(savename + '_q.nii', header_fpath, corrshift_q)
+    qmask = AUCdiff_q[non_nan_mask] < 0.05
+    coords_q05 = coords_nonnan[qmask,:]
+    AUC_q05 = AUC_nonnan[qmask,:]
+    spear = np.zeros((nPerm, 3))
+    for p in range(nPerm):
+        spear[p,:] = spearmanr(AUC_q05[:,p], coords_q05)[0][0,1:]
+    print('Spearman corr w/coords (q<0.05 masked) ZYX=', spear[0,:])
+    z = (spear[0,:]-spear[1:,:].mean(0))/np.std(spear[1:,:], axis=0)
+    print('p vals=', norm.sf(z))
 
 
+    # Correlate anticipation map and optimal event map
+    K = opt_event
+    K_nonnan = K[non_nan_mask]
+    K_q05 = K_nonnan[qmask]
+    K_spear = np.zeros(nPerm)
+    for p in range(nPerm):
+        K_spear[p] = spearmanr(AUC_q05[:,p], 90/K_q05)[0]
+    print('Spearman corr w/K (q<0.05 masked) =', K_spear[0])
+    z = (K_spear[0]-K_spear[1:].mean(0))/np.std(K_spear[1:])
+    print('p val=',norm.sf(z))
 
-def get_vox_map(SL_results, SL_voxels, non_nan_mask, return_q=True, return_z=False):
-    # SL_results is list of sl results, each length perm or size maps x perm
+def shift_corr(data_list, max_shift):
+    """Compute cross-correlation between initial and repeated viewings
+
+    Parameters
+    ----------
+    data_list : list of ndarrays
+        List of Reps x TRs x Vox arrays for each subject
+    max_shift : int
+        Maximum lag between intial and repeated viewings
+
+    Returns
+    -------
+    ndarray
+        Array of 1 + 2*max_shift lag correlations, first value is correlation
+        for initial viewing shifted earlier by max_shift timepoints
+    """
+
+    group_data = np.mean(data_list, axis=0).mean(2) # Rep x TR
+    rep1 = group_data[0,:]
+    rep2_6 = group_data[1:,:].mean(0)
+
+    return lag_pearsonr(rep1, rep2_6, max_shift)
+
+def compile_shift_corr(pickle_path, non_nan_mask, SL_allvox,
+                       header_fpath, save_path):
+    """Create map of peak of shift_corr
+
+    Parameters
+    ----------
+    pickle_path : string
+        Filepath to where pickles were saved for each searchlight
+    non_nan_mask : ndarray
+        3d boolean mask of valid voxels
+    SL_allvox : list of ndarrays
+        List of voxel indices for each searchlight
+    header_fpath : string
+        Filepath of nii file with header to use as a template
+    save_path : string
+        Location of output directory
+    """
+
+    nSL = 5354
+    nPerm = 100
+    TR = 1.5
+    max_lag = 10
+
+    corrshift = nSL * [None]
+    for sl_i in range(nSL):
+        corrshift[sl_i] = np.zeros(nPerm)
+        pickle_fname = '%sshift_corr_%d.p' % (pickle_path, sl_i)
+        pick_data = pickle.load(open(pickle_fname, 'rb'))
+
+        for p in range(nPerm):
+            lag_corr = pick_data[p][:]
+            corrshift[sl_i][p] = TR*(max_lag - nearest_peak(lag_corr))
+
+        cs, cs_q = get_vox_map(corrshift, SL_allvox, non_nan_mask)
+        save_nii(save_path + 'shift_corr.nii', header_fpath, cs)
+        save_nii(save_path + 'shift_corr_q.nii', header_fpath, cs_q)
+
+def get_vox_map(SL_results, SL_voxels, non_nan_mask, return_q=True):
     """Projects searchlight results to voxel maps.
 
     Parameters
     ----------
-    SL_results: list
-        Results of the searchlight analysis from s_light function.
-
+    SL_results: list of ndarrays
+        List of SL results, each of length nPerm or shape nMaps x nPerm
     SL_voxels: list
         Voxel information from searchlight analysis
-
     non_nan_mask: ndarray
-        Voxel x voxel x voxel boolean mask indicating elements containing data
+        3d boolean mask indicating elements containing data
+    return_q : boolean
+        Whether to compute and return FDR-corrected p values
 
     Returns
     -------
-    voxel_3dmap_rep1 : ndarray
-        Repetition 1's 3d voxel map of results
+    ndarray
+        Map of values in each voxel
 
-    voxel_3dmap_lastreps : ndarray
-        Last repetitions' 3d voxel map of results
+    ndarray
+        Map of q values for each voxel (if return_q=True)
     """
 
     coords = np.transpose(np.where(non_nan_mask))
@@ -322,17 +358,11 @@ def get_vox_map(SL_results, SL_voxels, non_nan_mask, return_q=True, return_z=Fal
     vox3d = np.full(non_nan_mask.shape + (nMaps,), np.nan)
     vox3d[non_nan_mask,:] = voxel_maps[:,0,:].T
 
-    if not return_q and not return_z:
+    if not return_q:
         return vox3d.squeeze()
 
     null_means = voxel_maps[:, 1:, nz_vox].mean(1)
     null_stds = np.std(voxel_maps[:, 1:, nz_vox], axis=1)
-
-    #!!
-    # if np.any(null_stds == 0):
-    #     const_vox = np.where(null_stds[0,:] == 0)[0]
-    #     for v in const_vox:
-    #         print(v, voxel_maps[0, 0, v], voxel_maps[0, 1, v])
 
     z = (voxel_maps[:, 0, nz_vox] - null_means)/null_stds
     p = norm.sf(z)
@@ -345,10 +375,4 @@ def get_vox_map(SL_results, SL_voxels, non_nan_mask, return_q=True, return_z=Fal
     q3d = np.full(non_nan_mask.shape + (nMaps,), np.nan)
     q3d[non_nan_mask,:] = q.T
 
-    if return_q and return_z:
-        return vox3d.squeeze(), q3d.squeeze(), z3d.squeeze()
-    elif return_q:
-        return vox3d.squeeze(), q3d.squeeze()
-    elif return_z:
-        return vox3d.squeeze(), z3d.squeeze()
-
+    return vox3d.squeeze(), q3d.squeeze()
