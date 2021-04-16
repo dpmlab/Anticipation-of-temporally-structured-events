@@ -1,25 +1,140 @@
-import glob
 from copy import deepcopy
 import numpy as np
 import nibabel as nib
-from scipy.stats import pearsonr, norm
+from scipy.stats import pearsonr, zscore
 from brainiak.eventseg.event import EventSegment
+from brainiak.funcalign.srm import DetSRM
 
+def nearest_peak(v):
+    """Estimates location of local maximum nearest the origin
 
-def tj_fit(data, n_events=7, avg_lasts=True):
+    Starting at the origin, we follow the local gradient until reaching a
+    local maximum. A quadratic function is then fit to the maximum and its
+    two surrounding points, and the peak of this function is used as a
+    continuous-valued estimate of the location of the maximum.
 
-    """Jointly fits HMM to multiple trials (repetitions).
+    Parameters
+    ----------
+    v : ndarray
+        Array of values from [-max_lag, max_lag] inclusive
+
+    Returns
+    -------
+    float
+        Location of peak of quadratic fit
+    """
+
+    lag = (len(v)-1)//2
+
+    # Find local maximum
+    while 2 <= lag <= (len(v) - 3):
+        win = v[(lag-1):(lag+2)]
+        if (win[1] > win[0]) and (win[1] > win[2]):
+            break
+        if win[0] > win[2]:
+            lag -= 1
+        else:
+            lag += 1
+
+    # Quadratic fit
+    x = [lag-1, lag, lag+1]
+    y = v[(lag-1):(lag+2)]
+    denom = (x[0] - x[1]) * (x[0] - x[2]) * (x[1] - x[2])
+    A = (x[2] * (y[1] - y[0]) + x[1] * \
+         (y[0] - y[2]) + x[0] * (y[2] - y[1])) / denom
+    B = (x[2]*x[2] * (y[0] - y[1]) + x[1]*x[1] * (y[2] - y[0]) + \
+         x[0]*x[0] * (y[1] - y[2])) / denom
+
+    max_x = (-B / (2*A))
+    return min(max(max_x, 0), len(v)-1)
+
+def hyperalign(subj_list, nFeatures=10):
+    """Perform hyperaligment with SRM
+
+    Given a list of data across subjects, concatenate across conditions and
+    then run SRM to map all subjects into a shared space. The data is
+    then divided back into conditions and z-scored.
+
+    Parameters
+    ----------
+    subj_list : list of ndarrays
+        List of a Reps x TRs x Vox array for each subject
+    nFeatures : int
+        Dimensionality of shared space
+
+    Returns
+    -------
+    list of ndarrays
+        List of a Reps x TRs x nFeatures array for each subject
+    """
+
+    nReps = subj_list[0].shape[0]
+    nTRs = subj_list[0].shape[1]
+
+    # Remove voxels that are all 0
+    subj_list = [d[:,:,np.all(~np.all(d == 0, axis=1), axis=0)]
+                 for d in subj_list]
+    # Remove any subjects with fewer voxels than nFeatures
+    subj_list = [d for d in subj_list if d.shape[2] >= nFeatures]
+
+    subj_list = [d.T.reshape(d.shape[-1], nTRs*nReps) for d in subj_list]
+    srm = DetSRM(features=nFeatures)
+    srm.fit(subj_list)
+    shared = srm.transform(subj_list)
+    shared = [zscore(d.reshape(d.shape[0], nTRs, nReps), axis=1, ddof=1).T
+              for d in shared]
+    return shared
+
+def heldout_ll(data, n_events, split):
+    """Compute log-likelihood on heldout subjects
+
+    Fits an event segmentation model with n_events to half of the subjects,
+    then measures the log-likelihood of this model on the other half. The
+    returned log-likehood averages across both choices of which half is
+    used for training and which is used for testing. The boolean array split
+    defines which subjects are in each half.
+
+    Parameters
+    ----------
+    data : ndarray
+        subj x TR x Voxels data array
+    n_events : int
+        Number of events for event segmentation model
+    split : ndarray
+        Boolean vector, subj in one group are True and in the other are False
+
+    Returns
+    -------
+    float
+        Average of log-likelihoods on testing groups
+    """
+
+    d = deepcopy(data)
+
+    # Remove nan voxels
+    nan_idxs = np.where(np.isnan(d))
+    nan_idxs = list(set(nan_idxs[2]))
+    d = np.delete(np.asarray(d), nan_idxs, axis=2)
+
+    # Train and test event segmentation across groups
+    group1 = d[split].mean(0)
+    group2 = d[~split].mean(0)
+    es = EventSegment(n_events).fit(group1)
+    _, ll12 = es.find_events(group2)
+    es = EventSegment(n_events).fit(group2)
+    _, ll21 = es.find_events(group1)
+
+    return (ll12 + ll21)/2
+
+def tj_fit(data, n_events=7):
+    """Jointly fits HMM to multiple trials (repetitions)
 
     Parameters
     ----------
     data : ndarray
         Data dimensions: Repetition x TR x Voxels
-
     n_events : int
         Number of events to fit
-
-    avg_lasts : bool, optional
-        If true, all viewings after the first are averaged
 
     Returns
     -------
@@ -28,9 +143,6 @@ def tj_fit(data, n_events=7, avg_lasts=True):
     """
 
     d = deepcopy(data)
-
-    if avg_lasts:
-        d = [d[0], np.nanmean(d[1:], axis=0)]
     d = np.asarray(d)
 
     nan_idxs = np.where(np.isnan(d))
@@ -149,17 +261,22 @@ def lag_pearsonr(x, y, max_lags):
 
     for i in range(max_lags + 1):
 
-        # add correlations where y is ahead of x
-        lag_corrs[i + max_lags] = pearsonr(x[:len(x) - i], y[i:len(y)])[0]
+        # add correlations where x is shifted to the right
+        lag_corrs[max_lags + i] = pearsonr(x[:len(x) - i], y[i:len(y)])[0]
 
-        # add correlations where y is behind x
+        # add correlations where x is shifted to the left
         lag_corrs[max_lags - i] = pearsonr(x[i:len(x)], y[:len(y) - i])[0]
 
     return lag_corrs
 
 
-def ev_annot_freq():
+def ev_annot_freq(bootstrap_rng=None):
     """Compute binned frequencies of event boundary annotations
+
+    Parameters
+    ----------
+    bootstrap_ng : Generator (from numpy.random.default_rng())
+        If provided, bootstrap resample event annotations
 
     Returns
     -------
@@ -168,24 +285,28 @@ def ev_annot_freq():
     """
 
     ev_annots = np.asarray(
-        [5, 12, 54, 77, 90,
-         3, 12, 23, 30, 36, 43, 50, 53, 78, 81, 87, 90,
-         11, 23, 30, 50, 74,
-         1, 55, 75, 90,
-         4, 10, 53, 77, 82, 90,
-         11, 54, 77, 81, 90,
-         12, 22, 36, 54, 78,
-         12, 52, 79, 90,
-         10, 23, 30, 36, 43, 50, 77, 90,
-         13, 55, 79, 90,
-         4, 10, 23, 29, 35, 44, 51, 56, 77, 80, 85, 90,
-         11, 55, 78, 90,
-         11, 30, 43, 54, 77, 90,
-         4, 11, 24, 30, 38, 44, 54, 77, 90]
-    )
+        [[5, 12, 54, 77, 90],
+         [3, 12, 23, 30, 36, 43, 50, 53, 78, 81, 87, 90],
+         [11, 23, 30, 50, 74],
+         [1, 55, 75, 90],
+         [4, 10, 53, 77, 82, 90],
+         [11, 54, 77, 81, 90],
+         [12, 22, 36, 54, 78],
+         [12, 52, 79, 90],
+         [10, 23, 30, 36, 43, 50, 77, 90],
+         [13, 55, 79, 90],
+         [4, 10, 23, 29, 35, 44, 51, 56, 77, 80, 85, 90],
+         [11, 55, 78, 90],
+         [11, 30, 43, 54, 77, 90],
+         [4, 11, 24, 30, 38, 44, 54, 77, 90]],
+    dtype=object)
 
-    frequencies = np.bincount(ev_annots)
-    return np.array(frequencies[1:], dtype=np.float64)/14
+    nAnnots = len(ev_annots)
+
+    if bootstrap_rng is not None:
+        ev_annots = ev_annots[bootstrap_rng.integers(0, nAnnots, size=nAnnots)]
+    frequencies = np.bincount(np.concatenate(ev_annots))
+    return np.array(frequencies[1:], dtype=np.float64)/nAnnots
 
 
 def hrf_convolution(ev_annots_freq):
@@ -254,55 +375,3 @@ def save_nii(new_fpath, header_fpath, data):
     img = nib.load(header_fpath)
     new_img = nib.Nifti1Image(data.T, img.affine, img.header)
     nib.save(new_img, new_fpath)
-
-def bootstrap_stats(boot_regex, savename, use_z = True):
-    """Compute statistics from bootstraps
-
-    If use_z = True, compute a z statistic using a Normal distribution and
-    correct for FDR, otherwise compute a p value as the fraction of
-    bootstraps less than zero.
-
-    Parameters
-    ----------
-    boot_regex : string
-        File pattern for bootstraps
-    savename : string
-        File to save p values to
-    use_z : boolean, optional
-        Determines the type of p value computation
-    """
-    bfiles = glob.glob(boot_regex)
-    d = np.stack([nib.load(f).get_fdata() for f in bfiles], axis=-1)
-    valid_vox = ~np.all(np.isnan(d), axis=3)
-
-    if use_z:
-        mean_d = d[valid_vox].mean(1)
-        std_d = np.std(d[valid_vox], axis=1)
-        p = norm.sf(mean_d/std_d)
-        p = FDR_p(p)
-    else:
-        p = np.mean(d[valid_vox] < 0, axis=1)
-
-    vox_p = np.full(d.shape[:3], np.nan)
-    vox_p[valid_vox] = p
-    save_nii(savename, bfiles[0], vox_p.T)
-
-def mask_nii(fpath, mask_path, savename, threshold=0.05):
-    """Mask a nii file using a statistical map
-
-    Parameters
-    ----------
-    fpath : string
-        File path of target nii
-    mask_path : string
-        File path for mask nii
-    savename : string
-        File to save masked nii to
-    threshold : float
-        Statistical threshold for mask
-    """
-    mask = nib.load(mask_path).get_fdata() < threshold
-    d = nib.load(fpath).get_fdata()
-    d_masked = np.full(d.shape, np.nan)
-    d_masked[mask] = d[mask]
-    save_nii(savename, fpath, d_masked.T)
