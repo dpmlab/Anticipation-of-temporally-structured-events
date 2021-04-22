@@ -1,19 +1,18 @@
 # Code for "Anticipation of temporally structured events in the brain"
 
-The code in this repository can be used to reproduce the results of [Lee, Aly, and Baldassano, "Anticipation of temporally structured events in the brain"](https://doi.org/10.1101/2020.10.14.338145)
+The code in this repository can be used to reproduce the results of [Lee, Aly, and Baldassano, "Anticipation of temporally structured events in the brain." eLife 2021.](https://doi.org/10.7554/eLife.64972)
 
-Data from ["Learning Naturalistic Temporal Structure in the Posterior Medial Network"](https://openneuro.org/datasets/ds001545/versions/1.1.1) was preprocessed using FSL as specified in preproc01.fsf. All the results reported in the manuscript can be reproduced by running main.py. Note that running all the bootstraps will be take substantial time (days), and you may want to modify these loops to take advantage of parallel processing resources available on your system.
+Data from ["Learning Naturalistic Temporal Structure in the Posterior Medial Network"](https://openneuro.org/datasets/ds001545/versions/1.1.1) was preprocessed using FSL as specified in preproc01.fsf. All the results reported in the manuscript can be reproduced by running main.py. Note that running all the permutations will be take substantial time (days), and you may want to modify these loops to take advantage of parallel processing resources.
 
 This code was originally run with:
-* Python version: 3.6.1
-* Anaconda version: 4.5.5
-* Backend/analysis dependencies: numpy, brainiak, scipy, nibabel
+* Python version: 3.6.12
+* brainiak version: 0.11
 
 
 
 MIT License
 
-Copyright (c) 2020, Caroline Lee and Christopher Baldassano
+Copyright (c) 2021, Caroline Lee and Christopher Baldassano
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
